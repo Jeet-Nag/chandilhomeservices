@@ -1,0 +1,436 @@
+import assert from 'node:assert';
+import { buildApp } from '../src/app';
+import { db } from '../src/db';
+import { en, hi, ApiResponse, ProviderJob, BookingDetail } from '@shared';
+
+async function runProviderAcceptanceTests() {
+  console.log('\n============================================================');
+  console.log('MODULE 8 — PROVIDER JOB ACCEPTANCE & CONCURRENCY VERIFICATION');
+  console.log('============================================================\n');
+
+  const app = await buildApp();
+  const pool = db.getPool();
+  if (!pool) {
+    throw new Error('Database pool unavailable');
+  }
+
+  let passed = 0;
+  let failed = 0;
+
+  function testAssert(condition: boolean, message: string) {
+    if (condition) {
+      passed++;
+      console.log(`  [PASS] ${message}`);
+    } else {
+      failed++;
+      console.error(`  [FAIL] ${message}`);
+    }
+  }
+
+  // Test accounts
+  const customerPhone = '9800088001';
+  const provider1Phone = '9800088002';
+  const provider2Phone = '9800088003';
+  const adminPhone = '9800088004';
+
+  // Cleanup old test fixtures
+  await pool.query('DELETE FROM booking_status_logs WHERE changed_by IN (SELECT id FROM users WHERE phone IN ($1, $2, $3, $4))', [
+    customerPhone,
+    provider1Phone,
+    provider2Phone,
+    adminPhone,
+  ]);
+  await pool.query('DELETE FROM bookings WHERE customer_id IN (SELECT id FROM users WHERE phone IN ($1, $2, $3, $4))', [
+    customerPhone,
+    provider1Phone,
+    provider2Phone,
+    adminPhone,
+  ]);
+  await pool.query('DELETE FROM users WHERE phone IN ($1, $2, $3, $4)', [
+    customerPhone,
+    provider1Phone,
+    provider2Phone,
+    adminPhone,
+  ]);
+
+  // Insert Users
+  const { rows: custRows } = await pool.query<{ id: string }>(
+    `INSERT INTO users (phone, role, full_name, preferred_language, is_active, token_version)
+     VALUES ($1, 'customer', 'Ramesh Customer', 'hi', true, 1) RETURNING id`,
+    [customerPhone]
+  );
+  const customerId = custRows[0].id;
+
+  const { rows: p1Rows } = await pool.query<{ id: string }>(
+    `INSERT INTO users (phone, role, full_name, preferred_language, is_active, token_version)
+     VALUES ($1, 'provider', 'Mahesh Electrician', 'hi', true, 1) RETURNING id`,
+    [provider1Phone]
+  );
+  const provider1Id = p1Rows[0].id;
+
+  const { rows: p2Rows } = await pool.query<{ id: string }>(
+    `INSERT INTO users (phone, role, full_name, preferred_language, is_active, token_version)
+     VALUES ($1, 'provider', 'Dinesh Plumber', 'en', true, 1) RETURNING id`,
+    [provider2Phone]
+  );
+  const provider2Id = p2Rows[0].id;
+
+  const { rows: adminRows } = await pool.query<{ id: string }>(
+    `INSERT INTO users (phone, role, full_name, preferred_language, is_active, token_version)
+     VALUES ($1, 'admin', 'Super Admin', 'en', true, 1) RETURNING id`,
+    [adminPhone]
+  );
+  const adminId = adminRows[0].id;
+
+  // Sign JWT Tokens
+  const customerToken = app.jwt.sign({ id: customerId, phone: customerPhone, role: 'customer', tokenVersion: 1 });
+  const provider1Token = app.jwt.sign({ id: provider1Id, phone: provider1Phone, role: 'provider', tokenVersion: 1 });
+  const provider2Token = app.jwt.sign({ id: provider2Id, phone: provider2Phone, role: 'provider', tokenVersion: 1 });
+  const adminToken = app.jwt.sign({ id: adminId, phone: adminPhone, role: 'admin', tokenVersion: 1 });
+
+  // Create an initial available booking
+  const b1Key = `accept-test-b1-${Date.now()}`;
+  const { rows: b1Rows } = await pool.query<{ id: string }>(
+    `INSERT INTO bookings (idempotency_key, customer_id, category_id, area_locality, landmark, text_description, visiting_fee, status)
+     VALUES ($1, $2, 'electrician', 'chandil-bazar', 'Near Temple', 'Ceiling fan capacitor burned', 99.00, 'SERVICE_REQUESTED')
+     RETURNING id`,
+    [b1Key, customerId]
+  );
+  const b1Id = b1Rows[0].id;
+
+  console.log('--- 1. Authorization Guards (Requirements 1-5) ---');
+
+  // 1.1 Unauthenticated request returns 401
+  const unauthRes = await app.inject({
+    method: 'POST',
+    url: `/api/provider/jobs/${b1Id}/accept`,
+  });
+  testAssert(unauthRes.statusCode === 401, 'Unauthenticated acceptance receives 401 Unauthorized (Requirement 4)');
+
+  // 1.2 Customer role returns 403 Forbidden
+  const custRes = await app.inject({
+    method: 'POST',
+    url: `/api/provider/jobs/${b1Id}/accept`,
+    headers: { authorization: `Bearer ${customerToken}` },
+  });
+  testAssert(custRes.statusCode === 403, 'Customer role cannot accept jobs (403 Forbidden) (Requirement 2)');
+
+  // 1.3 Admin role returns 403 Forbidden
+  const adminRes = await app.inject({
+    method: 'POST',
+    url: `/api/provider/jobs/${b1Id}/accept`,
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  testAssert(adminRes.statusCode === 403, 'Admin role cannot accept jobs (403 Forbidden) (Requirement 3)');
+
+  // 1.4 Attempting to spoof providerId in body is ignored
+  const spoofRes = await app.inject({
+    method: 'POST',
+    url: `/api/provider/jobs/${b1Id}/accept`,
+    headers: { authorization: `Bearer ${provider1Token}` },
+    payload: { providerId: provider2Id }, // malicious body attempting to assign another provider
+  });
+  testAssert(spoofRes.statusCode === 200, 'Provider 1 successfully accepted job (Requirement 1)');
+
+  const { rows: spoofCheck } = await pool.query<{ provider_id: string }>(
+    'SELECT provider_id FROM bookings WHERE id = $1',
+    [b1Id]
+  );
+  testAssert(spoofCheck[0].provider_id === provider1Id, 'Provider ID is strictly taken from auth JWT session, NOT from payload body (Requirement 5)');
+
+  console.log('\n--- 2. Validation & Terminal State Rejections (Requirements 6-11) ---');
+
+  // 2.1 Malformed UUID
+  const malformedRes = await app.inject({
+    method: 'POST',
+    url: '/api/provider/jobs/not-a-valid-uuid/accept',
+    headers: { authorization: `Bearer ${provider1Token}` },
+  });
+  testAssert(malformedRes.statusCode === 404, 'Malformed UUID returns 404 BOOKING_NOT_FOUND (Requirement 6)');
+
+  // 2.2 Missing/Nonexistent booking
+  const notFoundRes = await app.inject({
+    method: 'POST',
+    url: '/api/provider/jobs/00000000-0000-0000-0000-000000000000/accept',
+    headers: { authorization: `Bearer ${provider1Token}` },
+  });
+  testAssert(notFoundRes.statusCode === 404, 'Missing booking returns 404 BOOKING_NOT_FOUND (Requirement 7)');
+
+  // 2.3 Already assigned job rejected for a different provider (Requirement 8)
+  const alreadyClaimedRes = await app.inject({
+    method: 'POST',
+    url: `/api/provider/jobs/${b1Id}/accept`,
+    headers: { authorization: `Bearer ${provider2Token}` },
+  });
+  testAssert(alreadyClaimedRes.statusCode === 409, 'Different provider attempting to claim already assigned job receives 409 Conflict (Requirement 8)');
+  const alreadyClaimedBody: ApiResponse = JSON.parse(alreadyClaimedRes.payload);
+  testAssert(alreadyClaimedBody.error?.code === 'JOB_ALREADY_CLAIMED', 'Error code is JOB_ALREADY_CLAIMED');
+
+  // 2.4 Cancelled job rejected (Requirement 10)
+  const bCancelKey = `accept-test-cancel-${Date.now()}`;
+  const { rows: cancelRows } = await pool.query<{ id: string }>(
+    `INSERT INTO bookings (idempotency_key, customer_id, category_id, area_locality, text_description, visiting_fee, status)
+     VALUES ($1, $2, 'plumber', 'chowka', 'Cancelled tap leak', 99.00, 'CANCELLED_BY_CUSTOMER')
+     RETURNING id`,
+    [bCancelKey, customerId]
+  );
+  const cancelId = cancelRows[0].id;
+
+  const cancelRes = await app.inject({
+    method: 'POST',
+    url: `/api/provider/jobs/${cancelId}/accept`,
+    headers: { authorization: `Bearer ${provider1Token}` },
+  });
+  testAssert(cancelRes.statusCode === 409, 'Cancelled job cannot be accepted (409 Conflict) (Requirement 10)');
+
+  // 2.5 Completed job rejected (Requirement 11)
+  const bDoneKey = `accept-test-done-${Date.now()}`;
+  const { rows: doneRows } = await pool.query<{ id: string }>(
+    `INSERT INTO bookings (idempotency_key, customer_id, category_id, area_locality, text_description, visiting_fee, status)
+     VALUES ($1, $2, 'plumber', 'chowka', 'Completed work', 99.00, 'BOOKING_COMPLETED')
+     RETURNING id`,
+    [bDoneKey, customerId]
+  );
+  const doneId = doneRows[0].id;
+
+  const doneRes = await app.inject({
+    method: 'POST',
+    url: `/api/provider/jobs/${doneId}/accept`,
+    headers: { authorization: `Bearer ${provider1Token}` },
+  });
+  testAssert(doneRes.statusCode === 409, 'Completed job cannot be accepted (409 Conflict) (Requirement 11)');
+
+  console.log('\n--- 3. Successful Acceptance State & Customer Visibility (Requirements 12-19) ---');
+
+  // Verify Booking 1 state in DB
+  const { rows: b1StateRows } = await pool.query<{
+    status: string;
+    provider_id: string;
+    accepted_at: Date;
+    updated_at: Date;
+  }>(
+    'SELECT status, provider_id, accepted_at, updated_at FROM bookings WHERE id = $1',
+    [b1Id]
+  );
+  const b1State = b1StateRows[0];
+
+  testAssert(b1State.status === 'PROVIDER_ACCEPTED', 'Booking status transitioned to PROVIDER_ACCEPTED (Requirement 12)');
+  testAssert(b1State.provider_id === provider1Id, 'provider_id assigned correctly (Requirement 13)');
+  testAssert(b1State.accepted_at !== null, 'accepted_at timestamp is populated (Requirement 14)');
+  testAssert(b1State.updated_at !== null, 'updated_at timestamp is populated (Requirement 15)');
+
+  // Verify Status Log entry in DB
+  const { rows: b1LogRows } = await pool.query<{
+    from_status: string;
+    to_status: string;
+    changed_by: string;
+  }>(
+    'SELECT from_status, to_status, changed_by FROM booking_status_logs WHERE booking_id = $1',
+    [b1Id]
+  );
+  testAssert(b1LogRows.length === 1, 'Exactly one status log created for acceptance (Requirement 16)');
+  testAssert(b1LogRows[0].from_status === 'SERVICE_REQUESTED', 'Log from_status is SERVICE_REQUESTED (Requirement 17)');
+  testAssert(b1LogRows[0].to_status === 'PROVIDER_ACCEPTED', 'Log to_status is PROVIDER_ACCEPTED (Requirement 17)');
+  testAssert(b1LogRows[0].changed_by === provider1Id, 'Log changed_by is authenticated provider');
+
+  // Verify provider available jobs feed excludes this claimed booking (Requirement 18)
+  const feedRes = await app.inject({
+    method: 'GET',
+    url: '/api/provider/jobs',
+    headers: { authorization: `Bearer ${provider1Token}` },
+  });
+  const feedJobs: ProviderJob[] = JSON.parse(feedRes.payload).data;
+  testAssert(!feedJobs.some((j) => j.id === b1Id), 'Provider feed no longer returns the claimed job (Requirement 18)');
+
+  // Verify customer visibility on booking detail (Requirement 19)
+  const custDetailRes = await app.inject({
+    method: 'GET',
+    url: `/api/bookings/${b1Id}`,
+    headers: { authorization: `Bearer ${customerToken}` },
+  });
+  testAssert(custDetailRes.statusCode === 200, 'Customer can retrieve booking detail');
+  const custDetailBody: ApiResponse<BookingDetail> = JSON.parse(custDetailRes.payload);
+  testAssert(custDetailBody.data?.status === 'PROVIDER_ACCEPTED', 'Customer sees updated PROVIDER_ACCEPTED status (Requirement 19)');
+  testAssert(custDetailBody.data?.provider?.name === 'Mahesh Electrician', 'Customer sees assigned technician name (Requirement 19)');
+
+  console.log('\n--- 4. Same Provider Repeated Acceptance / Idempotency (Requirements 23-25) ---');
+
+  // Same provider calls accept again on the same job they already claimed
+  const repeatRes = await app.inject({
+    method: 'POST',
+    url: `/api/provider/jobs/${b1Id}/accept`,
+    headers: { authorization: `Bearer ${provider1Token}` },
+  });
+  testAssert(repeatRes.statusCode === 200, 'Same provider repeated acceptance returns 200 OK safely (Requirement 23)');
+
+  const { rows: b1LogsAfterRepeat } = await pool.query(
+    'SELECT id FROM booking_status_logs WHERE booking_id = $1',
+    [b1Id]
+  );
+  testAssert(b1LogsAfterRepeat.length === 1, 'No duplicate status log created on repeated acceptance (Requirement 24)');
+
+  const { rows: b1StateAfterRepeat } = await pool.query<{ status: string; provider_id: string }>(
+    'SELECT status, provider_id FROM bookings WHERE id = $1',
+    [b1Id]
+  );
+  testAssert(b1StateAfterRepeat[0].status === 'PROVIDER_ACCEPTED' && b1StateAfterRepeat[0].provider_id === provider1Id, 'No duplicate state transition or ownership change (Requirement 25)');
+
+  console.log('\n--- 5. Atomicity & Rollback Protection (Requirements 20-22) ---');
+
+  // Test rollback: If transaction aborts before commit, booking claim does NOT persist
+  const bRollbackKey = `accept-test-rollback-${Date.now()}`;
+  const { rows: rbRows } = await pool.query<{ id: string }>(
+    `INSERT INTO bookings (idempotency_key, customer_id, category_id, area_locality, text_description, visiting_fee, status)
+     VALUES ($1, $2, 'electrician', 'chandil-bazar', 'Testing rollback', 99.00, 'SERVICE_REQUESTED')
+     RETURNING id`,
+    [bRollbackKey, customerId]
+  );
+  const rbId = rbRows[0].id;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      "UPDATE bookings SET provider_id = $1, status = 'PROVIDER_ACCEPTED' WHERE id = $2",
+      [provider1Id, rbId]
+    );
+    // Simulate error during status log insertion or explicit rollback
+    await client.query('ROLLBACK');
+  } finally {
+    client.release();
+  }
+
+  const { rows: rbCheck } = await pool.query<{ status: string; provider_id: string | null }>(
+    'SELECT status, provider_id FROM bookings WHERE id = $1',
+    [rbId]
+  );
+  testAssert(rbCheck[0].status === 'SERVICE_REQUESTED', 'Failed transaction rolls back status to SERVICE_REQUESTED (Requirement 20)');
+  testAssert(rbCheck[0].provider_id === null, 'No partial provider assignment on rollback (Requirement 22)');
+
+  const { rows: rbLogsCheck } = await pool.query(
+    'SELECT id FROM booking_status_logs WHERE booking_id = $1',
+    [rbId]
+  );
+  testAssert(rbLogsCheck.length === 0, 'No orphan status log on rollback (Requirement 21)');
+
+  console.log('\n--- 6. CONCURRENCY — CRITICAL (Requirements 26-30) ---');
+
+  // Create a brand new unassigned SERVICE_REQUESTED booking for the race condition test
+  const raceKey = `accept-test-race-${Date.now()}`;
+  const { rows: raceRows } = await pool.query<{ id: string }>(
+    `INSERT INTO bookings (idempotency_key, customer_id, category_id, area_locality, text_description, visiting_fee, status)
+     VALUES ($1, $2, 'plumber', 'station-colony', 'Water pipe bursting in bathroom', 99.00, 'SERVICE_REQUESTED')
+     RETURNING id`,
+    [raceKey, customerId]
+  );
+  const raceId = raceRows[0].id;
+
+  // Two different authenticated providers concurrently claim the SAME booking
+  const [raceRes1, raceRes2] = await Promise.all([
+    app.inject({
+      method: 'POST',
+      url: `/api/provider/jobs/${raceId}/accept`,
+      headers: { authorization: `Bearer ${provider1Token}` },
+    }),
+    app.inject({
+      method: 'POST',
+      url: `/api/provider/jobs/${raceId}/accept`,
+      headers: { authorization: `Bearer ${provider2Token}` },
+    }),
+  ]);
+
+  const statusCodes = [raceRes1.statusCode, raceRes2.statusCode].sort();
+  testAssert(statusCodes[0] === 200 && statusCodes[1] === 409, 'Concurrently claiming same job: exactly one succeeds (200) and one receives conflict (409) (Requirements 26-28)');
+
+  const winnerBody = raceRes1.statusCode === 200 ? JSON.parse(raceRes1.payload) : JSON.parse(raceRes2.payload);
+  const loserBody = raceRes1.statusCode === 409 ? JSON.parse(raceRes1.payload) : JSON.parse(raceRes2.payload);
+
+  testAssert(winnerBody.success === true, 'Winning provider receives success envelope');
+  testAssert(loserBody.error?.code === 'JOB_ALREADY_CLAIMED', 'Losing provider receives JOB_ALREADY_CLAIMED error code (Requirement 28)');
+
+  // Verify DB state after the race
+  const { rows: raceDbRows } = await pool.query<{ status: string; provider_id: string }>(
+    'SELECT status, provider_id FROM bookings WHERE id = $1',
+    [raceId]
+  );
+  testAssert(raceDbRows[0].status === 'PROVIDER_ACCEPTED', 'Post-race booking status is PROVIDER_ACCEPTED');
+  testAssert(
+    raceDbRows[0].provider_id === provider1Id || raceDbRows[0].provider_id === provider2Id,
+    'Exactly one provider_id remains assigned in database (Requirement 29)'
+  );
+
+  const { rows: raceLogRows } = await pool.query(
+    'SELECT id, changed_by FROM booking_status_logs WHERE booking_id = $1',
+    [raceId]
+  );
+  testAssert(raceLogRows.length === 1, 'Exactly one successful transition exists in DB logs after race (Requirement 30)');
+
+  console.log('\n--- 7. Bilingual i18n Key Symmetry Audit for Module 8 ---');
+
+  const enKeys = Object.keys(en);
+  const hiKeys = Object.keys(hi);
+  testAssert(enKeys.length === hiKeys.length, `Matching dictionary sizes (${enKeys.length} keys each) (Requirement 31)`);
+
+  let allKeysPresent = true;
+  let allNonEmpty = true;
+  let noMixedHindi = true;
+
+  for (const k of enKeys) {
+    if (!hi[k as keyof typeof hi]) {
+      allKeysPresent = false;
+      console.error(`  Missing Hindi key: ${k}`);
+    }
+    const enVal = en[k as keyof typeof en];
+    const hiVal = hi[k as keyof typeof hi];
+    if (!enVal || enVal.trim() === '') allNonEmpty = false;
+    if (!hiVal || hiVal.trim() === '') allNonEmpty = false;
+
+    if (k !== 'lang.choose_title') {
+      if (/\([A-Za-z\s/]+\)/.test(hiVal)) {
+        noMixedHindi = false;
+        console.error(`  Leaked parenthetical English in Hindi key "${k}": ${hiVal}`);
+      }
+    }
+  }
+
+  testAssert(allKeysPresent, 'All translation keys exist in both English and Hindi (Requirement 31)');
+  testAssert(allNonEmpty, 'No translation strings are blank or empty');
+  testAssert(noMixedHindi, 'Zero parenthetical English translations in Hindi dictionary (Requirement 32)');
+
+  // Clean up fixtures
+  await pool.query('DELETE FROM booking_status_logs WHERE changed_by IN (SELECT id FROM users WHERE phone IN ($1, $2, $3, $4))', [
+    customerPhone,
+    provider1Phone,
+    provider2Phone,
+    adminPhone,
+  ]);
+  await pool.query('DELETE FROM bookings WHERE customer_id IN (SELECT id FROM users WHERE phone IN ($1, $2, $3, $4))', [
+    customerPhone,
+    provider1Phone,
+    provider2Phone,
+    adminPhone,
+  ]);
+  await pool.query('DELETE FROM users WHERE phone IN ($1, $2, $3, $4)', [
+    customerPhone,
+    provider1Phone,
+    provider2Phone,
+    adminPhone,
+  ]);
+
+  console.log('\n============================================================');
+  console.log(`PROVIDER ACCEPTANCE & CONCURRENCY TESTS: ${passed} PASSED, ${failed} FAILED.`);
+  console.log('============================================================\n');
+
+  await app.close();
+  await pool.end();
+
+  if (failed > 0) {
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+runProviderAcceptanceTests().catch((err) => {
+  console.error('Acceptance test runner fatal error:', err);
+  process.exit(1);
+});

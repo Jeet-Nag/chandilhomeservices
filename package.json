@@ -1,0 +1,28 @@
+{
+  "name": "chandil-home-services",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hyperlocal home-services platform for Chandil, Jharkhand",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace=server run dev",
+    "dev:client": "npm --workspace=client run dev",
+    "build:server": "npm --workspace=server run build",
+    "build:client": "npm --workspace=client run build",
+    "test": "npm --workspace=server run test",
+    "db:migrate": "npm --workspace=server run db:migrate",
+    "db:verify": "npm --workspace=server run db:verify"
+  },
+  "keywords": [
+    "chandil",
+    "home-services",
+    "fastify",
+    "preact"
+  ],
+  "author": "",
+  "license": "UNLICENSED"
+}

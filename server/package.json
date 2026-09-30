@@ -1,0 +1,37 @@
+{
+  "name": "server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "tsx tests/foundation.test.ts && tsx tests/auth.test.ts && tsx tests/category.test.ts && tsx tests/booking.test.ts && tsx tests/booking-status.test.ts && tsx tests/provider-feed.test.ts && tsx tests/provider-acceptance.test.ts && tsx tests/provider-rejection.test.ts && tsx tests/provider-progression.test.ts && tsx tests/provider-payment.test.ts",
+    "test:auth": "tsx tests/auth.test.ts",
+    "test:category": "tsx tests/category.test.ts",
+    "test:booking": "tsx tests/booking.test.ts",
+    "test:status": "tsx tests/booking-status.test.ts",
+    "test:provider": "tsx tests/provider-feed.test.ts",
+    "test:acceptance": "tsx tests/provider-acceptance.test.ts",
+    "test:rejection": "tsx tests/provider-rejection.test.ts",
+    "test:progression": "tsx tests/provider-progression.test.ts",
+    "test:payment": "tsx tests/provider-payment.test.ts",
+    "db:migrate": "tsx src/db/migrator.ts",
+    "db:verify": "tsx tests/db-verification.test.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@fastify/jwt": "^10.2.2",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "pg": "^8.13.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "@types/pg": "^8.11.11",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
