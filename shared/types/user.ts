@@ -32,3 +32,19 @@ export interface AuthSession {
     fullName: string | null;
   };
 }
+
+export interface AdminProviderView {
+  id: string;
+  phone: string;
+  fullName: string | null;
+  role: 'provider';
+  preferredLanguage: SupportedLanguage;
+  isActive: boolean;
+  categoryId: string;
+  categoryTitleEn: string;
+  categoryTitleHi: string;
+  serviceArea: string;
+  isAvailable: boolean;
+  rating: number;
+  createdAt: string;
+}
