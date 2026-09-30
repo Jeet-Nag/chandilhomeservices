@@ -11,6 +11,7 @@ import { BookingHistory } from './components/BookingHistory';
 import { BookingDetailScreen } from './components/BookingDetailScreen';
 import { ProviderHome } from './components/ProviderHome';
 import { ProviderJobDetailScreen } from './components/ProviderJobDetailScreen';
+import { AdminShell } from './components/AdminShell';
 
 export function App() {
   // 1. First-launch Language Selection Screen
@@ -59,7 +60,14 @@ export function App() {
     return <LoginScreen />;
   }
 
-  // 3. Provider Role Flow
+  const isAdminPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+
+  // 3. Admin Role Flow or /admin Protected Area
+  if (currentUser.value?.role === 'admin' || isAdminPath) {
+    return <AdminShell />;
+  }
+
+  // 4. Provider Role Flow
   if (currentUser.value?.role === 'provider') {
     if (selectedJobId.value) {
       return <ProviderJobDetailScreen />;

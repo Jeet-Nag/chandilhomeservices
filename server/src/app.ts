@@ -9,6 +9,7 @@ import { categoryRoutes } from './routes/category.routes';
 import { bookingRoutes } from './routes/booking.routes';
 import { audioRoutes } from './routes/audio.routes';
 import { providerRoutes } from './routes/provider.routes';
+import { adminRoutes } from './routes/admin.routes';
 import { ApiResponse } from '@shared';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -27,12 +28,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     secret: env.JWT_SECRET,
   });
 
-  // Register Auth, Category, Booking, Audio, Provider and RBAC routes
+  // Register Auth, Category, Booking, Audio, Provider, Admin and RBAC routes
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(categoryRoutes, { prefix: '/api/categories' });
   await app.register(bookingRoutes, { prefix: '/api/bookings' });
   await app.register(audioRoutes, { prefix: '/api/audio' });
   await app.register(providerRoutes, { prefix: '/api/provider' });
+  await app.register(adminRoutes, { prefix: '/api/admin' });
   await app.register(rbacTestRoutes);
 
   // Health check endpoint
