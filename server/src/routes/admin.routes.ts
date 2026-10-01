@@ -1,8 +1,9 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { authenticate, requireRole } from '../middleware/auth';
-import { ApiResponse, User, AdminProviderView } from '@shared';
+import { ApiResponse, User, AdminProviderView, AdminBookingListItem, AdminBookingDetail } from '@shared';
 import { AdminProviderService, AdminProviderError } from '../services/admin-provider.service';
+import { AdminBookingService, AdminBookingError } from '../services/admin-booking.service';
 
 const createProviderSchema = z
   .object({
@@ -29,8 +30,19 @@ const statusSchema = z
   })
   .strict();
 
+const cancelBookingSchema = z
+  .object({
+    reason: z
+      .string({ required_error: 'Cancellation reason is required' })
+      .trim()
+      .min(3, 'Cancellation reason must be at least 3 characters')
+      .max(255, 'Cancellation reason must not exceed 255 characters'),
+  })
+  .strict();
+
 export const adminRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   const adminProviderService = new AdminProviderService();
+  const adminBookingService = new AdminBookingService();
 
   /**
    * GET /api/admin/me
@@ -261,6 +273,154 @@ export const adminRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         return reply.status(200).send(response);
       } catch (err: any) {
         if (err instanceof AdminProviderError) {
+          const response: ApiResponse = {
+            success: false,
+            error: {
+              code: err.code,
+              messageEn: err.messageEn,
+              messageHi: err.messageHi,
+            },
+          };
+          return reply.status(err.statusCode).send(response);
+        }
+        throw err;
+      }
+    }
+  );
+
+  /**
+   * GET /api/admin/bookings
+   * Returns paginated list of bookings with customer, provider, and category summaries.
+   * Query parameters: status, category_id, provider_id, area_locality, search, limit, offset.
+   * RBAC: Strictly restricted to 'admin' role.
+   */
+  app.get(
+    '/bookings',
+    {
+      preHandler: [authenticate, requireRole(['admin'])],
+    },
+    async (request, reply) => {
+      try {
+        const query = request.query as {
+          status?: string;
+          category_id?: string;
+          provider_id?: string;
+          area_locality?: string;
+          search?: string;
+          limit?: string;
+          offset?: string;
+        };
+
+        const result = await adminBookingService.listBookings({
+          status: query.status,
+          categoryId: query.category_id,
+          providerId: query.provider_id,
+          areaLocality: query.area_locality,
+          search: query.search,
+          limit: query.limit !== undefined ? Number(query.limit) : undefined,
+          offset: query.offset !== undefined ? Number(query.offset) : undefined,
+        });
+
+        const response: ApiResponse<{
+          bookings: AdminBookingListItem[];
+          total: number;
+          limit: number;
+          offset: number;
+        }> = {
+          success: true,
+          data: result,
+        };
+        return reply.status(200).send(response);
+      } catch (err: any) {
+        if (err instanceof AdminBookingError) {
+          const response: ApiResponse = {
+            success: false,
+            error: {
+              code: err.code,
+              messageEn: err.messageEn,
+              messageHi: err.messageHi,
+            },
+          };
+          return reply.status(err.statusCode).send(response);
+        }
+        throw err;
+      }
+    }
+  );
+
+  /**
+   * GET /api/admin/bookings/:id
+   * Returns full operational detail for a single booking with customer, provider,
+   * category, and complete status timeline.
+   * RBAC: Strictly restricted to 'admin' role.
+   */
+  app.get(
+    '/bookings/:id',
+    {
+      preHandler: [authenticate, requireRole(['admin'])],
+    },
+    async (request, reply) => {
+      try {
+        const { id } = request.params as { id: string };
+        const detail = await adminBookingService.getBookingById(id);
+        const response: ApiResponse<AdminBookingDetail> = {
+          success: true,
+          data: detail,
+        };
+        return reply.status(200).send(response);
+      } catch (err: any) {
+        if (err instanceof AdminBookingError) {
+          const response: ApiResponse = {
+            success: false,
+            error: {
+              code: err.code,
+              messageEn: err.messageEn,
+              messageHi: err.messageHi,
+            },
+          };
+          return reply.status(err.statusCode).send(response);
+        }
+        throw err;
+      }
+    }
+  );
+
+  /**
+   * POST /api/admin/bookings/:id/cancel
+   * Administratively cancels an active booking with mandatory reason note.
+   * RBAC: Strictly restricted to 'admin' role.
+   */
+  app.post(
+    '/bookings/:id/cancel',
+    {
+      preHandler: [authenticate, requireRole(['admin'])],
+    },
+    async (request, reply) => {
+      try {
+        const { id } = request.params as { id: string };
+        const parsed = cancelBookingSchema.safeParse(request.body);
+        if (!parsed.success) {
+          const response: ApiResponse = {
+            success: false,
+            error: {
+              code: 'VALIDATION_ERROR',
+              messageEn: parsed.error.errors[0]?.message || 'Invalid request body',
+              messageHi: 'अमान्य अनुरोध विवरण।',
+            },
+          };
+          return reply.status(400).send(response);
+        }
+
+        const updated = await adminBookingService.cancelBooking(id, parsed.data.reason, request.user.id);
+        const response: ApiResponse<{ booking: AdminBookingDetail['booking'] }> = {
+          success: true,
+          data: {
+            booking: updated.booking,
+          },
+        };
+        return reply.status(200).send(response);
+      } catch (err: any) {
+        if (err instanceof AdminBookingError) {
           const response: ApiResponse = {
             success: false,
             error: {

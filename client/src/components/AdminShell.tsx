@@ -19,6 +19,7 @@ import {
   ChevronRightIcon,
 } from './icons';
 import { AdminProvidersView } from './AdminProvidersView';
+import { AdminBookingsView } from './AdminBookingsView';
 
 export function AdminShell() {
   const user = currentUser.value;
@@ -285,26 +286,9 @@ export function AdminShell() {
           <AdminProvidersView />
         )}
 
-        {/* Tab 3: Bookings Entry Point Placeholder */}
+        {/* Tab 3: Bookings Management View */}
         {!loading && activeTab === 'bookings' && (
-          <div class="space-y-4">
-            <div>
-              <h2 class="text-xl font-bold text-text-main">
-                {t('admin.booking_management_title')}
-              </h2>
-            </div>
-            <div class="bg-surface border border-border rounded-lg p-8 text-center shadow-xs">
-              <div class="w-14 h-14 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center text-text-sub">
-                <FileTextIcon size={28} />
-              </div>
-              <h3 class="text-base font-semibold text-text-main mb-1">
-                {t('admin.booking_management_title')}
-              </h3>
-              <p class="text-sm text-text-sub max-w-md mx-auto">
-                {t('admin.booking_management_placeholder')}
-              </p>
-            </div>
-          </div>
+          <AdminBookingsView />
         )}
       </main>
     </div>
