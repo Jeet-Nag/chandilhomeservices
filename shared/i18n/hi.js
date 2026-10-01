@@ -355,5 +355,14 @@ export const hi = {
     'provider.complete_booking_action': 'बुकिंग पूरी करें',
     'provider.booking_completed_banner': 'बुकिंग सफलतापूर्वक पूरी हो गई',
     'provider.collecting_payment': 'नकद प्राप्ति की पुष्टि हो रही है...',
-    'provider.payment_collect_failed': 'नकद भुगतान दर्ज करने में असमर्थ। कृपया पुनः प्रयास करें।'
+    'provider.payment_collect_failed': 'नकद भुगतान दर्ज करने में असमर्थ। कृपया पुनः प्रयास करें।',
+    // Module 12D Step 2: Provider Assigned-Job Flow
+    'provider.assigned_to_you': 'आपको सौंपा गया',
+    'provider.open_jobs': 'खुले काम',
+    'provider.assigned_jobs': 'सौंपे गए काम',
+    'provider.all_jobs': 'सभी काम',
+    'provider.assigned_job_banner': 'यह काम एडमिन द्वारा सीधे आपको सौंपा गया है',
+    'provider.accept_assigned_job': 'काम स्वीकार करें',
+    'provider.decline_assigned_job': 'अस्वीकार करें / छोड़ें',
+    'provider.assigned_notice': 'सीधे आपको सौंपा गया है। कृपया स्वीकार या अस्वीकार करें।'
 };

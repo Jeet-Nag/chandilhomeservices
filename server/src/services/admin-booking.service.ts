@@ -608,4 +608,225 @@ export class AdminBookingService {
     // Return the updated full detail
     return this.getBookingById(id);
   }
+
+  /**
+   * Administratively assign an eligible provider to a requested booking.
+   * Two-step dispatch model: transitions strictly SERVICE_REQUESTED -> PROVIDER_ASSIGNED.
+   * Enforces:
+   * 1. Row-level booking lock (FOR UPDATE)
+   * 2. Booking exists and is in status SERVICE_REQUESTED with provider_id IS NULL
+   * 3. Canonical state machine validation canTransition('SERVICE_REQUESTED', 'PROVIDER_ASSIGNED', 'admin')
+   * 4. Provider exists, is active (users.is_active = true), role = 'provider'
+   * 5. Provider profile exists, is available (provider_profiles.is_available = true)
+   * 6. Provider category matches booking category (category_id match)
+   * 7. Provider has NO active in-progress bookings (PROVIDER_ACCEPTED, PROVIDER_ON_THE_WAY, SERVICE_STARTED, PAYMENT_PENDING)
+   * 8. Atomic update: provider_id set, status set to PROVIDER_ASSIGNED (no timestamps or financial fields altered)
+   * 9. Audit log entry in booking_status_logs recording admin actor and server-resolved provider identity
+   */
+  public async assignProvider(id: string, providerId: string, adminId: string): Promise<AdminBookingDetail> {
+    this.validateUuid(id, 'booking ID');
+    this.validateUuid(providerId, 'provider ID');
+
+    const pool = db.getPool();
+    if (!pool) {
+      throw new AdminBookingError(
+        'DATABASE_UNAVAILABLE',
+        'Database connection is unavailable.',
+        'डेटाबेस कनेक्शन अनुपलब्ध है।',
+        500
+      );
+    }
+
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // 1. Lock the booking row for update to prevent concurrent race conditions
+      const lockRes = await client.query<{
+        id: string;
+        customer_id: string;
+        category_id: string;
+        provider_id: string | null;
+        status: BookingStatus;
+      }>(
+        'SELECT id, customer_id, category_id, provider_id, status FROM bookings WHERE id = $1 FOR UPDATE',
+        [id]
+      );
+
+      if (lockRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'BOOKING_NOT_FOUND',
+          'Booking not found.',
+          'बुकिंग नहीं मिली।',
+          404
+        );
+      }
+
+      const currentBooking = lockRes.rows[0];
+
+      // 2. Check if booking is already assigned or already has a provider
+      if (currentBooking.status === 'PROVIDER_ASSIGNED' || currentBooking.provider_id !== null) {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'BOOKING_ALREADY_ASSIGNED',
+          'Booking is already assigned to a provider.',
+          'बुकिंग पहले से ही किसी मिस्त्री को सौंपी गई है।',
+          409
+        );
+      }
+
+      // 3. Validate state transition using canonical booking state machine
+      if (currentBooking.status !== 'SERVICE_REQUESTED' || !canTransition(currentBooking.status, 'PROVIDER_ASSIGNED', 'admin')) {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'INVALID_STATUS_TRANSITION',
+          `Cannot assign booking in status ${currentBooking.status}.`,
+          `स्थिति ${currentBooking.status} में बुकिंग को मिस्त्री नहीं सौंपा जा सकता।`,
+          409
+        );
+      }
+
+      // 4. Lock and verify target provider account in users table
+      const userRes = await client.query<{
+        id: string;
+        phone: string;
+        full_name: string | null;
+        role: string;
+        is_active: boolean;
+      }>(
+        'SELECT id, phone, full_name, role, is_active FROM users WHERE id = $1 FOR UPDATE',
+        [providerId]
+      );
+
+      if (userRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'PROVIDER_NOT_FOUND',
+          'Provider not found.',
+          'मिस्त्री नहीं मिला।',
+          404
+        );
+      }
+
+      const providerUser = userRes.rows[0];
+
+      if (providerUser.role !== 'provider') {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'INVALID_PROVIDER_ROLE',
+          'Target user is not a service provider.',
+          'लक्षित उपयोगकर्ता सेवा प्रदाता नहीं है।',
+          400
+        );
+      }
+
+      if (!providerUser.is_active) {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'PROVIDER_INACTIVE',
+          'Cannot assign inactive provider.',
+          'निष्क्रिय मिस्त्री को काम नहीं सौंपा जा सकता।',
+          400
+        );
+      }
+
+      // 5. Verify provider profile exists and is available
+      const profileRes = await client.query<{
+        category_id: string;
+        service_area: string;
+        is_available: boolean;
+      }>(
+        'SELECT category_id, service_area, is_available FROM provider_profiles WHERE user_id = $1',
+        [providerId]
+      );
+
+      if (profileRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'PROVIDER_PROFILE_MISSING',
+          'Provider profile is missing.',
+          'मिस्त्री प्रोफ़ाइल गायब है।',
+          400
+        );
+      }
+
+      const profile = profileRes.rows[0];
+
+      if (!profile.is_available) {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'PROVIDER_UNAVAILABLE',
+          'Provider is currently marked unavailable.',
+          'मिस्त्री वर्तमान में अनुपलब्ध है।',
+          400
+        );
+      }
+
+      if (profile.category_id !== currentBooking.category_id) {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'CATEGORY_MISMATCH',
+          'Provider category does not match booking category.',
+          'मिस्त्री की श्रेणी बुकिंग श्रेणी से मेल नहीं खाती।',
+          400
+        );
+      }
+
+      // 6. Verify provider does NOT already have an active operational booking
+      const activeBookingsRes = await client.query<{ id: string; status: string }>(
+        `SELECT id, status FROM bookings
+         WHERE provider_id = $1
+           AND status IN ('PROVIDER_ACCEPTED', 'PROVIDER_ON_THE_WAY', 'SERVICE_STARTED', 'PAYMENT_PENDING')
+         LIMIT 1`,
+        [providerId]
+      );
+
+      if (activeBookingsRes.rows.length > 0) {
+        await client.query('ROLLBACK');
+        throw new AdminBookingError(
+          'ACTIVE_BOOKING_EXISTS',
+          'Cannot assign provider with an active booking in progress.',
+          'प्रगति पर बुकिंग वाले मिस्त्री को नया काम नहीं सौंपा जा सकता।',
+          409
+        );
+      }
+
+      // 7. Update booking: assign provider and advance status to PROVIDER_ASSIGNED
+      await client.query(
+        `UPDATE bookings
+         SET provider_id = $1,
+             status = 'PROVIDER_ASSIGNED',
+             updated_at = NOW()
+         WHERE id = $2`,
+        [providerId, id]
+      );
+
+      // 8. Record audit status log in the same database transaction
+      const providerDisplayName = providerUser.full_name || 'Technician';
+      const auditNote = `Assigned to provider ${providerDisplayName} (${providerUser.phone})`;
+
+      await client.query(
+        `INSERT INTO booking_status_logs (
+           booking_id,
+           from_status,
+           to_status,
+           changed_by,
+           notes
+         ) VALUES ($1, 'SERVICE_REQUESTED', 'PROVIDER_ASSIGNED', $2, $3)`,
+        [id, adminId, auditNote]
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Return the updated full detail
+    return this.getBookingById(id);
+  }
 }

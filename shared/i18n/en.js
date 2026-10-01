@@ -355,5 +355,14 @@ export const en = {
     'provider.complete_booking_action': 'Complete Booking',
     'provider.booking_completed_banner': 'Booking successfully completed',
     'provider.collecting_payment': 'Confirming Cash Collection...',
-    'provider.payment_collect_failed': 'Unable to confirm cash collection. Please try again.'
+    'provider.payment_collect_failed': 'Unable to confirm cash collection. Please try again.',
+    // Module 12D Step 2: Provider Assigned-Job Flow
+    'provider.assigned_to_you': 'Assigned to You',
+    'provider.open_jobs': 'Open Jobs',
+    'provider.assigned_jobs': 'Assigned Jobs',
+    'provider.all_jobs': 'All Jobs',
+    'provider.assigned_job_banner': 'This job has been directly assigned to you by admin dispatch',
+    'provider.accept_assigned_job': 'Accept Job',
+    'provider.decline_assigned_job': 'Decline / Relinquish',
+    'provider.assigned_notice': 'Directly assigned to you. Please accept or decline.'
 };

@@ -1,4 +1,4 @@
-import { useEffect } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import {
   providerJobs,
   isProviderJobsLoading,
@@ -43,6 +43,7 @@ export function ProviderHome() {
   const jobs = providerJobs.value;
   const isLoading = isProviderJobsLoading.value;
   const error = providerJobsError.value;
+  const [filter, setFilter] = useState<'all' | 'assigned' | 'open'>('all');
 
   useEffect(() => {
     if (categories.value.length === 0) {
@@ -50,6 +51,14 @@ export function ProviderHome() {
     }
     refreshProviderJobs();
   }, []);
+
+  const assignedJobs = jobs.filter((j) => j.status === 'PROVIDER_ASSIGNED');
+  const openJobs = jobs.filter((j) => j.status === 'SERVICE_REQUESTED');
+  const filteredJobs = filter === 'assigned'
+    ? assignedJobs
+    : filter === 'open'
+    ? openJobs
+    : jobs;
 
   const providerDisplayName = user?.fullName || user?.phone || '';
 
@@ -123,20 +132,66 @@ export function ProviderHome() {
       {/* Main Content Area */}
       <main class="max-w-md mx-auto w-full p-4 flex-1 space-y-4">
         {/* Section Header */}
-        <div class="flex items-center justify-between pt-1">
-          <div class="flex items-center space-x-2">
-            <h2 class="text-sm font-bold text-text-main">
-              {t('provider.available_jobs')}
-            </h2>
-            <span class="inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold rounded-full bg-action/10 text-action">
-              {jobs.length}
-            </span>
+        <div class="space-y-2 pt-1">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <h2 class="text-sm font-bold text-text-main">
+                {t('provider.available_jobs')}
+              </h2>
+              <span class="inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold rounded-full bg-action/10 text-action">
+                {jobs.length}
+              </span>
+            </div>
+
+            {isLoading && (
+              <div class="flex items-center space-x-1 text-xs text-brand">
+                <SpinnerIcon size={14} />
+                <span>{t('provider.refreshing')}</span>
+              </div>
+            )}
           </div>
 
-          {isLoading && (
-            <div class="flex items-center space-x-1 text-xs text-brand">
-              <SpinnerIcon size={14} />
-              <span>{t('provider.refreshing')}</span>
+          {/* Filter Pills when assigned jobs exist */}
+          {assignedJobs.length > 0 && (
+            <div class="flex items-center space-x-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setFilter('all')}
+                class={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors min-h-[36px] ${
+                  filter === 'all'
+                    ? 'bg-brand text-white shadow-xs'
+                    : 'bg-surface border border-border text-text-sub hover:text-text-main'
+                }`}
+              >
+                {t('provider.all_jobs')} ({jobs.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilter('assigned')}
+                class={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors min-h-[36px] flex items-center space-x-1.5 ${
+                  filter === 'assigned'
+                    ? 'bg-brand text-white shadow-xs'
+                    : 'bg-blue-50 border border-blue-200 text-brand hover:bg-blue-100'
+                }`}
+              >
+                <span>{t('provider.assigned_jobs')}</span>
+                <span class={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  filter === 'assigned' ? 'bg-white/20 text-white' : 'bg-blue-200 text-brand'
+                }`}>
+                  {assignedJobs.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilter('open')}
+                class={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors min-h-[36px] ${
+                  filter === 'open'
+                    ? 'bg-brand text-white shadow-xs'
+                    : 'bg-surface border border-border text-text-sub hover:text-text-main'
+                }`}
+              >
+                {t('provider.open_jobs')} ({openJobs.length})
+              </button>
             </div>
           )}
         </div>
@@ -171,7 +226,7 @@ export function ProviderHome() {
         )}
 
         {/* Empty State */}
-        {!isLoading && !error && jobs.length === 0 && (
+        {!isLoading && !error && filteredJobs.length === 0 && (
           <div class="bg-surface border border-border rounded-lg p-8 text-center space-y-4 shadow-sm my-4">
             <div class="w-14 h-14 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto">
               <ClockIcon size={30} />
@@ -194,9 +249,9 @@ export function ProviderHome() {
         )}
 
         {/* Job Cards List */}
-        {!error && jobs.length > 0 && (
+        {!error && filteredJobs.length > 0 && (
           <div class="space-y-3">
-            {jobs.map((job) => {
+            {filteredJobs.map((job) => {
               const category = categories.value.find((c) => c.id === job.categoryId);
               const categoryTitle = category
                 ? (lang === 'hi' ? category.titleHi : category.titleEn)
@@ -208,17 +263,24 @@ export function ProviderHome() {
                 : job.areaLocality;
 
               const shortId = `#CHS-${job.id.substring(0, 8).toUpperCase()}`;
+              const isAssigned = job.status === 'PROVIDER_ASSIGNED';
 
               return (
                 <button
                   key={job.id}
                   onClick={() => openJobDetail(job.id)}
-                  class="w-full text-left bg-surface border border-border hover:border-brand rounded-lg p-4 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-brand/30 space-y-3 active:bg-slate-50 min-h-[48px]"
+                  class={`w-full text-left bg-surface rounded-lg p-4 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-brand/30 space-y-3 active:bg-slate-50 min-h-[48px] border ${
+                    isAssigned
+                      ? 'border-blue-300 hover:border-brand bg-blue-50/20'
+                      : 'border-border hover:border-brand'
+                  }`}
                 >
                   {/* Category & Fee Row */}
                   <div class="flex items-start justify-between">
                     <div class="flex items-center space-x-3">
-                      <div class="w-10 h-10 rounded-lg bg-brand/10 text-brand flex items-center justify-center shrink-0">
+                      <div class={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+                        isAssigned ? 'bg-blue-100 text-brand' : 'bg-brand/10 text-brand'
+                      }`}>
                         {category ? (
                           <CategoryIconRenderer iconName={category.iconName} size={22} />
                         ) : (
@@ -229,8 +291,19 @@ export function ProviderHome() {
                         <div class="text-sm font-bold text-text-main leading-tight">
                           {categoryTitle}
                         </div>
-                        <div class="text-xs text-text-sub font-mono mt-0.5">
-                          {shortId}
+                        <div class="flex items-center space-x-2 mt-0.5">
+                          <span class="text-xs text-text-sub font-mono">
+                            {shortId}
+                          </span>
+                          {isAssigned ? (
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-brand border border-blue-200">
+                              {t('provider.assigned_to_you')}
+                            </span>
+                          ) : (
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-text-sub border border-slate-200">
+                              {t('provider.open_jobs')}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

@@ -61,10 +61,11 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
       `SELECT id, category_id, area_locality, landmark, text_description, 
               audio_url, audio_duration_seconds, visiting_fee, status, created_at
        FROM bookings 
-       WHERE status = 'SERVICE_REQUESTED' 
-         AND provider_id IS NULL 
-       ORDER BY created_at DESC 
-       LIMIT 50`
+       WHERE (status = 'SERVICE_REQUESTED' AND provider_id IS NULL)
+          OR (status = 'PROVIDER_ASSIGNED' AND provider_id = $1)
+       ORDER BY CASE WHEN status = 'PROVIDER_ASSIGNED' THEN 0 ELSE 1 END, created_at DESC
+       LIMIT 50`,
+      [request.user.id]
     );
 
     const jobs: ProviderJob[] = rows.map(mapProviderJobRow);
@@ -80,6 +81,7 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
    * GET /api/provider/jobs/:id
    * Retrieves specific permitted job details for the authenticated provider.
    * RBAC: Strictly restricted to 'provider' role.
+   * Access: Open broadcast jobs or jobs assigned to/claimed by the authenticated provider.
    * Privacy: Returns only necessary job details, omitting customer PII.
    */
   app.get<{ Params: { id: string } }>('/jobs/:id', {
@@ -113,9 +115,10 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
       return reply.status(500).send(response);
     }
 
-    const { rows } = await pool.query<DbProviderJobRow>(
+    const { rows } = await pool.query<DbProviderJobRow & { provider_id: string | null }>(
       `SELECT id, category_id, area_locality, landmark, text_description, 
-              audio_url, audio_duration_seconds, visiting_fee, status, created_at
+              audio_url, audio_duration_seconds, visiting_fee, status, created_at,
+              provider_id
        FROM bookings 
        WHERE id = $1`,
       [id]
@@ -133,7 +136,23 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
       return reply.status(404).send(response);
     }
 
-    const job: ProviderJob = mapProviderJobRow(rows[0]);
+    const row = rows[0];
+    const isOpen = row.status === 'SERVICE_REQUESTED' && row.provider_id === null;
+    const isOwner = row.provider_id === request.user.id;
+
+    if (!isOpen && !isOwner) {
+      const response: ApiResponse = {
+        success: false,
+        error: {
+          code: 'BOOKING_NOT_FOUND',
+          messageEn: 'Job not found.',
+          messageHi: 'काम नहीं मिला।',
+        },
+      };
+      return reply.status(404).send(response);
+    }
+
+    const job: ProviderJob = mapProviderJobRow(row);
 
     const response: ApiResponse<ProviderJob> = {
       success: true,
@@ -186,47 +205,13 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
     try {
       await client.query('BEGIN');
 
-      // 2. Atomic conditional claim
-      const updateRes = await client.query<DbProviderJobRow>(
-        `UPDATE bookings
-         SET provider_id = $1,
-             status = 'PROVIDER_ACCEPTED',
-             accepted_at = NOW(),
-             updated_at = NOW()
-         WHERE id = $2
-           AND status = 'SERVICE_REQUESTED'
-           AND provider_id IS NULL
-         RETURNING id, category_id, area_locality, landmark, text_description, 
-                   audio_url, audio_duration_seconds, visiting_fee, status, created_at`,
-        [request.user.id, id]
-      );
-
-      if (updateRes.rows.length === 1) {
-        // 3. Atomically record the status log entry
-        await client.query(
-          `INSERT INTO booking_status_logs (booking_id, from_status, to_status, changed_by, notes)
-           VALUES ($1, 'SERVICE_REQUESTED', 'PROVIDER_ACCEPTED', $2, $3)`,
-          [id, request.user.id, 'Technician accepted job']
-        );
-
-        await client.query('COMMIT');
-
-        const response: ApiResponse<ProviderJob> = {
-          success: true,
-          data: mapProviderJobRow(updateRes.rows[0]),
-        };
-        return reply.status(200).send(response);
-      }
-
-      // If 0 rows updated, rollback and inspect state to return the correct conflict/not-found code
-      await client.query('ROLLBACK');
-
-      const checkRes = await pool.query<{ id: string; provider_id: string | null; status: BookingStatus }>(
-        'SELECT id, provider_id, status FROM bookings WHERE id = $1',
+      const checkRes = await client.query<{ id: string; provider_id: string | null; status: BookingStatus }>(
+        'SELECT id, provider_id, status FROM bookings WHERE id = $1 FOR UPDATE',
         [id]
       );
 
       if (checkRes.rows.length === 0) {
+        await client.query('ROLLBACK');
         const response: ApiResponse = {
           success: false,
           error: {
@@ -242,6 +227,7 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
 
       // 4. Repeated acceptance by the SAME provider (Idempotency guarantee)
       if (existing.provider_id === request.user.id && existing.status === 'PROVIDER_ACCEPTED') {
+        await client.query('ROLLBACK');
         const currentJobRes = await pool.query<DbProviderJobRow>(
           `SELECT id, category_id, area_locality, landmark, text_description, 
                   audio_url, audio_duration_seconds, visiting_fee, status, created_at
@@ -256,16 +242,57 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
         return reply.status(200).send(response);
       }
 
-      // 5. Already claimed by another technician, or invalid/terminal state
-      const response: ApiResponse = {
-        success: false,
-        error: {
-          code: 'JOB_ALREADY_CLAIMED',
-          messageEn: 'This job has already been claimed by another technician or is no longer available.',
-          messageHi: 'यह काम किसी अन्य मिस्त्री द्वारा पहले ही स्वीकार कर लिया गया है या अब उपलब्ध नहीं है।',
-        },
+      let fromStatus: BookingStatus | null = null;
+      let auditNote = '';
+
+      if (existing.status === 'SERVICE_REQUESTED' && existing.provider_id === null) {
+        fromStatus = 'SERVICE_REQUESTED';
+        auditNote = 'Technician accepted job';
+      } else if (existing.status === 'PROVIDER_ASSIGNED' && existing.provider_id === request.user.id) {
+        fromStatus = 'PROVIDER_ASSIGNED';
+        auditNote = 'Technician accepted assigned job';
+      }
+
+      if (!fromStatus) {
+        await client.query('ROLLBACK');
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: 'JOB_ALREADY_CLAIMED',
+            messageEn: 'This job has already been claimed by another technician or is no longer available.',
+            messageHi: 'यह काम किसी अन्य मिस्त्री द्वारा पहले ही स्वीकार कर लिया गया है या अब उपलब्ध नहीं है।',
+          },
+        };
+        return reply.status(409).send(response);
+      }
+
+      // 2. Atomic claim / accept
+      const updateRes = await client.query<DbProviderJobRow>(
+        `UPDATE bookings
+         SET provider_id = $1,
+             status = 'PROVIDER_ACCEPTED',
+             accepted_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $2
+         RETURNING id, category_id, area_locality, landmark, text_description,
+                   audio_url, audio_duration_seconds, visiting_fee, status, created_at`,
+        [request.user.id, id]
+      );
+
+      // 3. Atomically record the status log entry
+      await client.query(
+        `INSERT INTO booking_status_logs (booking_id, from_status, to_status, changed_by, notes)
+         VALUES ($1, $2, 'PROVIDER_ACCEPTED', $3, $4)`,
+        [id, fromStatus, request.user.id, auditNote]
+      );
+
+      await client.query('COMMIT');
+
+      const response: ApiResponse<ProviderJob> = {
+        success: true,
+        data: mapProviderJobRow(updateRes.rows[0]),
       };
-      return reply.status(409).send(response);
+      return reply.status(200).send(response);
     } catch (err) {
       await client.query('ROLLBACK');
       request.log.error(err, 'Failed to accept job atomically');
@@ -336,48 +363,13 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
     try {
       await client.query('BEGIN');
 
-      // 2. Atomic conditional relinquishment
-      // Must currently be PROVIDER_ACCEPTED and owned by request.user.id
-      const updateRes = await client.query<DbProviderJobRow>(
-        `UPDATE bookings
-         SET status = 'SERVICE_REQUESTED',
-             provider_id = NULL,
-             accepted_at = NULL,
-             updated_at = NOW()
-         WHERE id = $1
-           AND status = 'PROVIDER_ACCEPTED'
-           AND provider_id = $2
-         RETURNING id, category_id, area_locality, landmark, text_description, 
-                   audio_url, audio_duration_seconds, visiting_fee, status, created_at`,
-        [id, request.user.id]
-      );
-
-      if (updateRes.rows.length === 1) {
-        // 3. Atomically record the REJECTED_BY_PROVIDER audit log entry
-        await client.query(
-          `INSERT INTO booking_status_logs (booking_id, from_status, to_status, changed_by, notes)
-           VALUES ($1, 'PROVIDER_ACCEPTED', 'REJECTED_BY_PROVIDER', $2, $3)`,
-          [id, request.user.id, 'Relinquished by technician']
-        );
-
-        await client.query('COMMIT');
-
-        const response: ApiResponse<ProviderJob> = {
-          success: true,
-          data: mapProviderJobRow(updateRes.rows[0]),
-        };
-        return reply.status(200).send(response);
-      }
-
-      // If 0 rows updated, rollback and inspect state for exact conflict code
-      await client.query('ROLLBACK');
-
-      const checkRes = await pool.query<{ id: string; provider_id: string | null; status: BookingStatus }>(
-        'SELECT id, provider_id, status FROM bookings WHERE id = $1',
+      const checkRes = await client.query<{ id: string; provider_id: string | null; status: BookingStatus }>(
+        'SELECT id, provider_id, status FROM bookings WHERE id = $1 FOR UPDATE',
         [id]
       );
 
       if (checkRes.rows.length === 0) {
+        await client.query('ROLLBACK');
         const response: ApiResponse = {
           success: false,
           error: {
@@ -393,6 +385,7 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
 
       // Safe conflict responses based on existing state
       if (existing.status === 'SERVICE_REQUESTED' && existing.provider_id === null) {
+        await client.query('ROLLBACK');
         const response: ApiResponse = {
           success: false,
           error: {
@@ -405,6 +398,7 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
       }
 
       if (existing.provider_id !== request.user.id) {
+        await client.query('ROLLBACK');
         const response: ApiResponse = {
           success: false,
           error: {
@@ -416,16 +410,54 @@ export const providerRoutes: FastifyPluginAsync = async (app: FastifyInstance) =
         return reply.status(409).send(response);
       }
 
-      // If owned by user but in downstream state (e.g. PROVIDER_ON_THE_WAY) or terminal
-      const response: ApiResponse = {
-        success: false,
-        error: {
-          code: 'JOB_NO_LONGER_ASSIGNED',
-          messageEn: 'This job cannot be relinquished in its current status.',
-          messageHi: 'इस स्थिति में यह काम छोड़ा नहीं जा सकता।',
-        },
+      if (existing.status !== 'PROVIDER_ACCEPTED' && existing.status !== 'PROVIDER_ASSIGNED') {
+        await client.query('ROLLBACK');
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: 'JOB_NO_LONGER_ASSIGNED',
+            messageEn: 'This job cannot be relinquished in its current status.',
+            messageHi: 'इस स्थिति में यह काम छोड़ा नहीं जा सकता।',
+          },
+        };
+        return reply.status(409).send(response);
+      }
+
+      const fromStatus = existing.status;
+      const toStatus = fromStatus === 'PROVIDER_ASSIGNED'
+        ? 'SERVICE_REQUESTED'
+        : 'REJECTED_BY_PROVIDER';
+      const auditNote = fromStatus === 'PROVIDER_ASSIGNED'
+        ? 'Technician declined assigned job; returned to broadcast'
+        : 'Relinquished by technician';
+
+      // 2. Atomic conditional relinquishment
+      const updateRes = await client.query<DbProviderJobRow>(
+        `UPDATE bookings
+         SET status = 'SERVICE_REQUESTED',
+             provider_id = NULL,
+             accepted_at = NULL,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING id, category_id, area_locality, landmark, text_description,
+                   audio_url, audio_duration_seconds, visiting_fee, status, created_at`,
+        [id]
+      );
+
+      // 3. Atomically record the audit log entry
+      await client.query(
+        `INSERT INTO booking_status_logs (booking_id, from_status, to_status, changed_by, notes)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [id, fromStatus, toStatus, request.user.id, auditNote]
+      );
+
+      await client.query('COMMIT');
+
+      const response: ApiResponse<ProviderJob> = {
+        success: true,
+        data: mapProviderJobRow(updateRes.rows[0]),
       };
-      return reply.status(409).send(response);
+      return reply.status(200).send(response);
     } catch (err) {
       await client.query('ROLLBACK');
       request.log.error(err, 'Failed to relinquish job atomically');

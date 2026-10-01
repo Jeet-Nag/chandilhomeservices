@@ -40,6 +40,14 @@ const cancelBookingSchema = z
   })
   .strict();
 
+const assignProviderSchema = z
+  .object({
+    providerId: z
+      .string({ required_error: 'providerId is required' })
+      .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, 'providerId must be a valid UUID'),
+  })
+  .strict();
+
 export const adminRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   const adminProviderService = new AdminProviderService();
   const adminBookingService = new AdminBookingService();
@@ -416,6 +424,61 @@ export const adminRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           success: true,
           data: {
             booking: updated.booking,
+          },
+        };
+        return reply.status(200).send(response);
+      } catch (err: any) {
+        if (err instanceof AdminBookingError) {
+          const response: ApiResponse = {
+            success: false,
+            error: {
+              code: err.code,
+              messageEn: err.messageEn,
+              messageHi: err.messageHi,
+            },
+          };
+          return reply.status(err.statusCode).send(response);
+        }
+        throw err;
+      }
+    }
+  );
+
+  /**
+   * POST /api/admin/bookings/:id/assign
+   * Administratively assigns an eligible provider to a requested booking.
+   * RBAC: Strictly restricted to 'admin' role.
+   */
+  app.post(
+    '/bookings/:id/assign',
+    {
+      preHandler: [authenticate, requireRole(['admin'])],
+    },
+    async (request, reply) => {
+      try {
+        const { id } = request.params as { id: string };
+        const parsed = assignProviderSchema.safeParse(request.body);
+        if (!parsed.success) {
+          const response: ApiResponse = {
+            success: false,
+            error: {
+              code: 'VALIDATION_ERROR',
+              messageEn: parsed.error.errors[0]?.message || 'Invalid request body',
+              messageHi: 'अमान्य अनुरोध विवरण।',
+            },
+          };
+          return reply.status(400).send(response);
+        }
+
+        const updated = await adminBookingService.assignProvider(id, parsed.data.providerId, request.user.id);
+        const response: ApiResponse<{
+          booking: AdminBookingDetail['booking'];
+          provider: AdminBookingDetail['provider'];
+        }> = {
+          success: true,
+          data: {
+            booking: updated.booking,
+            provider: updated.provider,
           },
         };
         return reply.status(200).send(response);

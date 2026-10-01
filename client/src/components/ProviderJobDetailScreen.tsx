@@ -81,6 +81,12 @@ function getProviderStatusBadge(status: BookingStatus): { bg: string; dot: strin
         dot: 'bg-amber-500',
         pulse: true,
       };
+    case 'PROVIDER_ASSIGNED':
+      return {
+        bg: 'bg-blue-50 border-blue-200 text-brand',
+        dot: 'bg-brand',
+        pulse: true,
+      };
     case 'SERVICE_REQUESTED':
     default:
       return {
@@ -363,8 +369,64 @@ export function ProviderJobDetailScreen() {
                 </div>
               )}
 
-              {/* Open Broadcast Request: Accept Job */}
-              {job.status === 'SERVICE_REQUESTED' ? (
+              {/* Assigned by Admin: Accept or Decline / Relinquish */}
+              {job.status === 'PROVIDER_ASSIGNED' ? (
+                <div class="space-y-3">
+                  <div class="bg-blue-50 border border-blue-200 text-brand rounded-lg p-4 text-xs flex items-center space-x-3 shadow-xs">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 text-brand flex items-center justify-center shrink-0">
+                      <AlertCircleIcon size={18} />
+                    </div>
+                    <div>
+                      <div class="font-bold text-sm text-brand">
+                        {t('provider.assigned_to_you')}
+                      </div>
+                      <div class="text-[11px] text-text-sub mt-0.5">
+                        {t('provider.assigned_job_banner')}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Primary Action: Accept Job (Min 48px touch target) */}
+                  <button
+                    type="button"
+                    onClick={() => acceptJob(job.id)}
+                    disabled={isAcceptingJob.value || isRejectingJob.value}
+                    class="w-full min-h-[48px] px-6 py-3 bg-action hover:bg-action-active text-white rounded-lg font-bold text-sm transition-colors flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-action/40 active:bg-green-800"
+                  >
+                    {isAcceptingJob.value ? (
+                      <>
+                        <SpinnerIcon size={18} class="animate-spin" />
+                        <span>{t('provider.accepting')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckIcon size={18} />
+                        <span>{t('provider.accept_assigned_job')}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Secondary Action: Decline / Relinquish (Min 48px touch target) */}
+                  <button
+                    type="button"
+                    onClick={() => rejectJob(job.id)}
+                    disabled={isRejectingJob.value || isAcceptingJob.value}
+                    class="w-full min-h-[48px] px-6 py-3 border border-red-300 hover:border-red-400 bg-white hover:bg-red-50 text-red-700 rounded-lg font-bold text-sm transition-colors flex items-center justify-center space-x-2 shadow-xs disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-red-400/40 active:bg-red-100"
+                  >
+                    {isRejectingJob.value ? (
+                      <>
+                        <SpinnerIcon size={18} class="animate-spin text-red-600" />
+                        <span>{t('provider.rejecting')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <XIcon size={18} class="text-red-600" />
+                        <span>{t('provider.decline_assigned_job')}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : job.status === 'SERVICE_REQUESTED' ? (
                 <button
                   type="button"
                   onClick={() => acceptJob(job.id)}

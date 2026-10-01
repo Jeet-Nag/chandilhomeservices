@@ -372,5 +372,14 @@ export type TranslationKey =
   | 'provider.complete_booking_action'
   | 'provider.booking_completed_banner'
   | 'provider.collecting_payment'
-  | 'provider.payment_collect_failed';
+  | 'provider.payment_collect_failed'
 
+  // Module 12D Step 2: Provider Assigned-Job Flow
+  | 'provider.assigned_to_you'
+  | 'provider.open_jobs'
+  | 'provider.assigned_jobs'
+  | 'provider.all_jobs'
+  | 'provider.assigned_job_banner'
+  | 'provider.accept_assigned_job'
+  | 'provider.decline_assigned_job'
+  | 'provider.assigned_notice';
