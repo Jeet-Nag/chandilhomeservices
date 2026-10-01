@@ -3,6 +3,7 @@ import {
   ApiResponse,
   AdminBookingListItem,
   AdminBookingDetail,
+  AdminProviderView,
   BookingStatus,
   canTransition,
 } from '@shared';
@@ -76,6 +77,57 @@ export const cancelReasonError = signal<string | null>(null);
 export const isCancelling = signal<boolean>(false);
 export const cancelError = signal<string | null>(null);
 export const cancelSuccessMessage = signal<string | null>(null);
+
+// Module 12D: Provider Assignment Modal State
+export const isAssignModalOpen = signal<boolean>(false);
+export const assignSelectedProviderId = signal<string | null>(null);
+export const assignSearchQuery = signal<string>('');
+export const isAssigning = signal<boolean>(false);
+export const assignError = signal<string | null>(null);
+export const assignSuccessMessage = signal<string | null>(null);
+export const assignableProviders = signal<AdminProviderView[]>([]);
+export const isAssignProvidersLoading = signal<boolean>(false);
+export const assignProvidersError = signal<string | null>(null);
+
+/**
+ * Filtered and sorted providers for assignment:
+ * - Search by name or phone
+ * - Category matching prioritized first
+ * - Available prioritized over unavailable
+ */
+export const filteredAssignableProviders = computed(() => {
+  const query = assignSearchQuery.value.trim().toLowerCase();
+  const detail = selectedBookingDetail.value;
+  const bookingCategoryId = detail?.category?.id || '';
+
+  let list = assignableProviders.value;
+
+  if (query) {
+    list = list.filter((p) => {
+      const nameMatch = p.fullName ? p.fullName.toLowerCase().includes(query) : false;
+      const phoneMatch = p.phone.toLowerCase().includes(query);
+      return nameMatch || phoneMatch;
+    });
+  }
+
+  return [...list].sort((a, b) => {
+    const aMatch = bookingCategoryId ? a.categoryId === bookingCategoryId : false;
+    const bMatch = bookingCategoryId ? b.categoryId === bookingCategoryId : false;
+
+    if (aMatch && !bMatch) return -1;
+    if (!aMatch && bMatch) return 1;
+
+    if (a.isAvailable && !b.isAvailable) return -1;
+    if (!a.isAvailable && b.isAvailable) return 1;
+
+    if (a.isActive && !b.isActive) return -1;
+    if (!a.isActive && b.isActive) return 1;
+
+    const nameA = a.fullName || '';
+    const nameB = b.fullName || '';
+    return nameA.localeCompare(nameB);
+  });
+});
 
 /**
  * Validates cancellation reason text (3–255 characters).
@@ -434,4 +486,203 @@ export async function submitCancelBooking(): Promise<boolean> {
 
 export function clearCancelSuccessMessage(): void {
   cancelSuccessMessage.value = null;
+}
+
+/**
+ * Opens provider assignment modal and fetches available providers.
+ */
+export async function openAssignModal(): Promise<void> {
+  assignSelectedProviderId.value = null;
+  assignSearchQuery.value = '';
+  assignError.value = null;
+  isAssignModalOpen.value = true;
+  await loadAssignableProviders();
+}
+
+/**
+ * Closes provider assignment modal.
+ */
+export function closeAssignModal(): void {
+  isAssignModalOpen.value = false;
+  assignSelectedProviderId.value = null;
+  assignSearchQuery.value = '';
+  assignError.value = null;
+}
+
+/**
+ * Fetches all registered providers for the assignment selector.
+ */
+export async function loadAssignableProviders(): Promise<void> {
+  const token = authToken.value;
+  if (!token) return;
+
+  isAssignProvidersLoading.value = true;
+  assignProvidersError.value = null;
+
+  try {
+    const res = await fetch('/api/admin/providers', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (res.status === 401) {
+      handleSessionExpired();
+      return;
+    }
+
+    if (!res.ok) {
+      assignProvidersError.value = t('admin.assign_load_providers_error');
+      return;
+    }
+
+    const body: ApiResponse<{ providers: AdminProviderView[] }> = await res.json();
+    if (body.success && body.data) {
+      assignableProviders.value = body.data.providers || [];
+    } else {
+      assignProvidersError.value = t('admin.assign_load_providers_error');
+    }
+  } catch {
+    assignProvidersError.value = t('admin.assign_load_providers_error');
+  } finally {
+    isAssignProvidersLoading.value = false;
+  }
+}
+
+/**
+ * Selects a target provider for assignment.
+ */
+export function setAssignSelectedProvider(providerId: string): void {
+  const p = assignableProviders.value.find((prov) => prov.id === providerId);
+  if (p && (!p.isActive || !p.isAvailable)) {
+    return;
+  }
+  assignSelectedProviderId.value = providerId;
+  assignError.value = null;
+}
+
+/**
+ * Submits administrative provider assignment.
+ * Transitions strictly SERVICE_REQUESTED -> PROVIDER_ASSIGNED.
+ */
+export async function submitAssignProvider(): Promise<boolean> {
+  const detail = selectedBookingDetail.value;
+  if (!detail) return false;
+
+  if (!assignSelectedProviderId.value) {
+    assignError.value = t('admin.assign_select_prompt');
+    return false;
+  }
+
+  if (isAssigning.value) return false;
+
+  const token = authToken.value;
+  if (!token) {
+    handleSessionExpired();
+    return false;
+  }
+
+  isAssigning.value = true;
+  assignError.value = null;
+
+  try {
+    const res = await fetch(`/api/admin/bookings/${detail.booking.id}/assign`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        providerId: assignSelectedProviderId.value,
+      }),
+    });
+
+    if (res.status === 401) {
+      handleSessionExpired();
+      return false;
+    }
+
+    const body: ApiResponse<{
+      booking: AdminBookingDetail['booking'];
+      provider: AdminBookingDetail['provider'];
+    }> = await res.json();
+
+    if (!res.ok || !body.success) {
+      const errCode = body.error?.code;
+
+      if (errCode === 'BOOKING_ALREADY_ASSIGNED' || errCode === 'INVALID_STATUS_TRANSITION') {
+        assignError.value = t('admin.assign_conflict_error');
+      } else if (errCode === 'ACTIVE_BOOKING_EXISTS') {
+        assignError.value = t('admin.assign_active_booking_exists');
+      } else if (errCode === 'PROVIDER_INACTIVE') {
+        assignError.value = t('admin.assign_provider_inactive');
+      } else if (errCode === 'PROVIDER_UNAVAILABLE') {
+        assignError.value = t('admin.assign_provider_unavailable');
+      } else if (errCode === 'CATEGORY_MISMATCH') {
+        assignError.value = t('admin.assign_category_mismatch');
+      } else if (errCode === 'INVALID_PROVIDER_ROLE') {
+        assignError.value = t('admin.assign_invalid_provider_role');
+      } else if (errCode === 'PROVIDER_PROFILE_MISSING') {
+        assignError.value = t('admin.assign_provider_profile_missing');
+      } else if (errCode === 'PROVIDER_NOT_FOUND') {
+        assignError.value = t('admin.assign_provider_not_found');
+      } else {
+        assignError.value = currentLanguage.value === 'hi'
+          ? (body.error?.messageHi || t('admin.assign_generic_error'))
+          : (body.error?.messageEn || t('admin.assign_generic_error'));
+      }
+
+      if (res.status === 409 || errCode === 'BOOKING_ALREADY_ASSIGNED' || errCode === 'INVALID_STATUS_TRANSITION') {
+        await refreshSelectedBookingDetail();
+        await fetchAdminBookings();
+      }
+
+      return false;
+    }
+
+    // Success: update active booking detail status and provider
+    const assignedProvider = body.data?.provider || assignableProviders.value.find((p) => p.id === assignSelectedProviderId.value);
+    const providerName = assignedProvider?.fullName || 'Technician';
+
+    if (selectedBookingDetail.value) {
+      selectedBookingDetail.value = {
+        ...selectedBookingDetail.value,
+        booking: {
+          ...selectedBookingDetail.value.booking,
+          status: 'PROVIDER_ASSIGNED',
+          timestamps: {
+            ...selectedBookingDetail.value.booking.timestamps,
+            ...(body.data?.booking?.timestamps || {}),
+          },
+        },
+        provider: assignedProvider
+          ? {
+              id: assignedProvider.id,
+              fullName: assignedProvider.fullName,
+              phone: assignedProvider.phone,
+              serviceArea: assignedProvider.serviceArea,
+              rating: assignedProvider.rating,
+            }
+          : selectedBookingDetail.value.provider,
+      };
+    }
+
+    assignSuccessMessage.value = t('admin.assign_success', { name: providerName });
+
+    closeAssignModal();
+    // Refresh detail and list from authoritative server
+    await refreshSelectedBookingDetail();
+    await fetchAdminBookings();
+
+    return true;
+  } catch {
+    assignError.value = t('admin.assign_generic_error');
+    return false;
+  } finally {
+    isAssigning.value = false;
+  }
+}
+
+export function clearAssignSuccessMessage(): void {
+  assignSuccessMessage.value = null;
 }

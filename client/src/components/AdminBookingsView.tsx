@@ -46,6 +46,22 @@ import {
   closeCancelModal,
   submitCancelBooking,
   clearCancelSuccessMessage,
+  isAssignModalOpen,
+  assignSelectedProviderId,
+  assignSearchQuery,
+  isAssigning,
+  assignError,
+  assignSuccessMessage,
+  assignableProviders,
+  isAssignProvidersLoading,
+  assignProvidersError,
+  filteredAssignableProviders,
+  openAssignModal,
+  closeAssignModal,
+  loadAssignableProviders,
+  setAssignSelectedProvider,
+  submitAssignProvider,
+  clearAssignSuccessMessage,
 } from '../state/admin-bookings';
 import {
   BookingStatus,
@@ -66,6 +82,7 @@ import {
   PhoneIcon,
   ChevronRightIcon,
   ClockIcon,
+  UserPlusIcon,
 } from './icons';
 
 const ALL_STATUS_OPTIONS: BookingStatus[] = [
@@ -174,7 +191,7 @@ export function AdminBookingsView() {
   const total = bookingsTotal.value;
   const loading = isBookingsLoading.value;
   const error = bookingsError.value;
-  const successMsg = cancelSuccessMessage.value;
+  const successMsg = cancelSuccessMessage.value || assignSuccessMessage.value;
   const cats = categories.value;
   const provs = providersList.value;
   const range = showingRange.value;
@@ -239,7 +256,10 @@ export function AdminBookingsView() {
             <span class="text-sm font-semibold">{successMsg}</span>
           </div>
           <button
-            onClick={clearCancelSuccessMessage}
+            onClick={() => {
+              clearCancelSuccessMessage();
+              clearAssignSuccessMessage();
+            }}
             class="min-h-[48px] min-w-[48px] p-2 text-action/70 hover:text-action rounded-lg flex items-center justify-center"
             aria-label="Dismiss"
           >
@@ -845,10 +865,24 @@ export function AdminBookingsView() {
                         </div>
                       </div>
                     ) : (
-                      <div class="py-4 text-center">
-                        <span class="inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold bg-slate-100 text-text-sub border border-slate-200">
-                          {t('admin.not_assigned')}
-                        </span>
+                      <div class="py-3 text-center space-y-2">
+                        <div>
+                          <span class="inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold bg-slate-100 text-text-sub border border-slate-200">
+                            {t('admin.not_assigned')}
+                          </span>
+                        </div>
+                        {selectedBookingDetail.value.booking.status === 'SERVICE_REQUESTED' && (
+                          <div class="pt-1">
+                            <button
+                              type="button"
+                              onClick={openAssignModal}
+                              class="min-h-[48px] px-4 py-2 bg-brand hover:bg-brand-dark text-white text-xs font-semibold rounded-lg shadow-xs inline-flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                              <UserPlusIcon size={16} />
+                              <span>{t('admin.assign_provider_btn')}</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1100,13 +1134,26 @@ export function AdminBookingsView() {
             {/* Modal Actions Footer */}
             {!isDetailLoading.value && selectedBookingDetail.value && (
               <div class="pt-3 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div>
+                <div class="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+                  {selectedBookingDetail.value.booking.status === 'SERVICE_REQUESTED' &&
+                    !selectedBookingDetail.value.provider && (
+                      <button
+                        type="button"
+                        onClick={openAssignModal}
+                        class="min-h-[48px] px-5 py-2.5 bg-brand hover:bg-brand-dark text-white text-xs font-semibold rounded-lg shadow-xs transition-colors flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                      >
+                        <UserPlusIcon size={16} />
+                        <span>{t('admin.assign_provider_btn')}</span>
+                      </button>
+                    )}
+
                   {canTransition(
                     selectedBookingDetail.value.booking.status,
                     'CANCELLED_BY_ADMIN',
                     'admin'
                   ) && (
                     <button
+                      type="button"
                       onClick={openCancelModal}
                       class="min-h-[48px] px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors w-full sm:w-auto"
                     >
@@ -1116,6 +1163,7 @@ export function AdminBookingsView() {
                 </div>
 
                 <button
+                  type="button"
                   onClick={closeBookingDetail}
                   class="min-h-[48px] px-5 py-2.5 bg-background hover:bg-slate-100 border border-border text-text-main text-xs font-semibold rounded-lg transition-colors w-full sm:w-auto"
                 >
@@ -1212,6 +1260,255 @@ export function AdminBookingsView() {
                   </>
                 ) : (
                   <span>{t('admin.cancel_confirm_btn')}</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Provider Assignment Modal */}
+      {isAssignModalOpen.value && selectedBookingDetail.value && (
+        <div class="fixed inset-0 z-60 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div class="relative bg-surface border border-border rounded-xl max-w-xl w-full p-5 md:p-6 shadow-2xl space-y-4 my-8 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div class="flex items-start justify-between pb-3 border-b border-border shrink-0">
+              <div class="flex items-center gap-2.5">
+                <div class="w-10 h-10 rounded-full bg-brand/10 text-brand flex items-center justify-center shrink-0">
+                  <UserPlusIcon size={20} />
+                </div>
+                <div>
+                  <h3 class="text-base font-bold text-text-main">
+                    {t('admin.assign_modal_title')}
+                  </h3>
+                  <p class="text-xs text-text-sub mt-0.5">
+                    {t('admin.assign_modal_desc')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeAssignModal}
+                disabled={isAssigning.value}
+                class="min-h-[48px] min-w-[48px] p-2 text-text-sub hover:text-text-main rounded-lg flex items-center justify-center"
+                aria-label={t('admin.close_modal')}
+              >
+                <XIcon size={18} />
+              </button>
+            </div>
+
+            {/* Booking Context Banner */}
+            <div class="bg-background border border-border rounded-lg p-3 shrink-0 text-xs space-y-2">
+              <div class="text-[11px] font-bold uppercase tracking-wider text-text-sub">
+                {t('admin.assign_booking_context')} (
+                <span class="font-mono text-text-main font-semibold">
+                  #{selectedBookingDetail.value.booking.id.slice(0, 8)}
+                </span>
+                )
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div>
+                  <span class="text-text-sub block text-[11px]">{t('admin.assign_category_label')}:</span>
+                  <span class="font-semibold text-text-main">
+                    {lang === 'hi'
+                      ? selectedBookingDetail.value.category.titleHi
+                      : selectedBookingDetail.value.category.titleEn}
+                  </span>
+                </div>
+                <div>
+                  <span class="text-text-sub block text-[11px]">{t('admin.assign_location_label')}:</span>
+                  <span class="font-semibold text-text-main">
+                    {selectedBookingDetail.value.booking.areaLocality}
+                  </span>
+                </div>
+                {selectedBookingDetail.value.booking.landmark && (
+                  <div class="col-span-2 sm:col-span-1">
+                    <span class="text-text-sub block text-[11px]">{t('admin.detail_landmark')}:</span>
+                    <span class="font-semibold text-text-main truncate block">
+                      {selectedBookingDetail.value.booking.landmark}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Error Banner */}
+            {assignError.value && (
+              <div class="p-3 rounded-lg bg-red-50 border border-red-200 text-danger text-xs flex items-start gap-2 shrink-0">
+                <AlertCircleIcon size={16} class="shrink-0 mt-0.5" />
+                <span>{assignError.value}</span>
+              </div>
+            )}
+
+            {/* Search Provider Input */}
+            <div class="relative shrink-0">
+              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-text-sub">
+                <SearchIcon size={16} />
+              </div>
+              <input
+                type="text"
+                value={assignSearchQuery.value}
+                onInput={(e) => {
+                  assignSearchQuery.value = (e.target as HTMLInputElement).value;
+                }}
+                placeholder={t('admin.assign_search_placeholder')}
+                class="w-full pl-9 pr-8 py-2.5 bg-background border border-border rounded-lg text-xs text-text-main focus:outline-none focus:ring-2 focus:ring-brand min-h-[48px]"
+              />
+              {assignSearchQuery.value && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    assignSearchQuery.value = '';
+                  }}
+                  class="absolute inset-y-0 right-0 pr-3 flex items-center text-text-sub hover:text-text-main min-h-[48px] min-w-[48px] justify-center"
+                  aria-label="Clear search"
+                >
+                  <XIcon size={14} />
+                </button>
+              )}
+            </div>
+
+            {/* Provider List Area (Scrollable) */}
+            <div class="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[220px]">
+              {isAssignProvidersLoading.value ? (
+                <div class="py-12 text-center text-text-sub space-y-3">
+                  <SpinnerIcon size={24} class="animate-spin mx-auto text-brand" />
+                  <p class="text-xs">{t('admin.assign_loading_providers')}</p>
+                </div>
+              ) : assignProvidersError.value ? (
+                <div class="py-8 text-center space-y-3">
+                  <p class="text-xs text-danger">{assignProvidersError.value}</p>
+                  <button
+                    type="button"
+                    onClick={loadAssignableProviders}
+                    class="min-h-[48px] px-4 py-2 bg-background hover:bg-slate-100 border border-border text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <RefreshIcon size={14} />
+                    <span>{t('admin.assign_retry')}</span>
+                  </button>
+                </div>
+              ) : filteredAssignableProviders.value.length === 0 ? (
+                <div class="py-10 text-center text-text-sub space-y-2">
+                  <AlertCircleIcon size={24} class="mx-auto opacity-50" />
+                  <p class="text-xs">{t('admin.assign_no_providers_found')}</p>
+                </div>
+              ) : (
+                filteredAssignableProviders.value.map((provider) => {
+                  const isSelected = assignSelectedProviderId.value === provider.id;
+                  const isMatchingCategory =
+                    provider.categoryId === selectedBookingDetail.value?.category.id;
+                  const isSelectable = provider.isActive && provider.isAvailable;
+
+                  return (
+                    <label
+                      key={provider.id}
+                      onClick={() => {
+                        if (isSelectable) {
+                          setAssignSelectedProvider(provider.id);
+                        }
+                      }}
+                      class={`min-h-[48px] p-3 rounded-lg border flex items-center justify-between gap-3 transition-colors ${
+                        !isSelectable
+                          ? 'opacity-60 cursor-not-allowed bg-slate-50/80 border-slate-200'
+                          : isSelected
+                          ? 'border-brand bg-brand/5 ring-1 ring-brand cursor-pointer'
+                          : 'border-border bg-background hover:bg-slate-50 cursor-pointer'
+                      }`}
+                    >
+                      <div class="flex items-center gap-3">
+                        <input
+                          type="radio"
+                          name="assignedProvider"
+                          value={provider.id}
+                          checked={isSelected}
+                          disabled={!isSelectable}
+                          onChange={() => {
+                            if (isSelectable) {
+                              setAssignSelectedProvider(provider.id);
+                            }
+                          }}
+                          class={`w-4 h-4 text-brand border-border focus:ring-brand accent-brand ${
+                            !isSelectable ? 'cursor-not-allowed' : 'cursor-pointer'
+                          }`}
+                        />
+                        <div>
+                          <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold text-text-main">
+                              {provider.fullName || '—'}
+                            </span>
+                            {/* Matching Category Badge */}
+                            {isMatchingCategory ? (
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-brand border border-blue-200">
+                                {t('admin.assign_matching_category')}
+                              </span>
+                            ) : (
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-text-sub border border-slate-200">
+                                {lang === 'hi' ? provider.categoryTitleHi : provider.categoryTitleEn}
+                              </span>
+                            )}
+                          </div>
+                          <div class="text-[11px] text-text-sub flex items-center gap-2 mt-0.5">
+                            <span>{provider.phone}</span>
+                            <span>•</span>
+                            <span>{provider.serviceArea}</span>
+                            <span>•</span>
+                            <span class="text-action font-semibold">★ {provider.rating}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Status Badges */}
+                      <div class="flex flex-col items-end gap-1 shrink-0">
+                        <span
+                          class={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+                            provider.isAvailable
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}
+                        >
+                          {provider.isAvailable
+                            ? t('admin.assign_available')
+                            : t('admin.assign_busy')}
+                        </span>
+                        {!provider.isActive && (
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200">
+                            {t('admin.assign_inactive')}
+                          </span>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div class="pt-3 border-t border-border flex flex-col sm:flex-row items-center justify-end gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={closeAssignModal}
+                disabled={isAssigning.value}
+                class="min-h-[48px] px-4 py-2.5 bg-background hover:bg-slate-100 border border-border text-text-main text-xs font-semibold rounded-lg transition-colors w-full sm:w-auto"
+              >
+                {t('admin.cancel')}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => submitAssignProvider()}
+                disabled={!assignSelectedProviderId.value || isAssigning.value}
+                class="min-h-[48px] px-5 py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg shadow-xs flex items-center justify-center gap-2 transition-colors w-full sm:w-auto"
+              >
+                {isAssigning.value ? (
+                  <>
+                    <SpinnerIcon size={14} class="animate-spin" />
+                    <span>{t('admin.assign_confirming_btn')}</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckIcon size={14} />
+                    <span>{t('admin.assign_confirm_btn')}</span>
+                  </>
                 )}
               </button>
             </div>

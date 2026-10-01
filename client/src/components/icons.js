@@ -93,3 +93,6 @@ export function SearchIcon({ size = 20, class: className = '' }) {
 export function PlusIcon({ size = 20, class: className = '' }) {
     return (_jsxs("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2.5", "stroke-linecap": "round", "stroke-linejoin": "round", class: className, "aria-hidden": "true", children: [_jsx("line", { x1: "12", y1: "5", x2: "12", y2: "19" }), _jsx("line", { x1: "5", y1: "12", x2: "19", y2: "12" })] }));
 }
+export function UserPlusIcon({ size = 20, class: className = '' }) {
+    return (_jsxs("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", class: className, "aria-hidden": "true", children: [_jsx("path", { d: "M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" }), _jsx("circle", { cx: "8.5", cy: "7", r: "4" }), _jsx("line", { x1: "20", y1: "8", x2: "20", y2: "14" }), _jsx("line", { x1: "23", y1: "11", x2: "17", y2: "11" })] }));
+}
