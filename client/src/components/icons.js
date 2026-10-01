@@ -87,3 +87,9 @@ export function XIcon({ size = 20, class: className = '' }) {
 export function NavigationIcon({ size = 20, class: className = '' }) {
     return (_jsx("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", class: className, "aria-hidden": "true", children: _jsx("polygon", { points: "3 11 22 2 13 21 11 13 3 11" }) }));
 }
+export function SearchIcon({ size = 20, class: className = '' }) {
+    return (_jsxs("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", class: className, "aria-hidden": "true", children: [_jsx("circle", { cx: "11", cy: "11", r: "8" }), _jsx("line", { x1: "21", y1: "21", x2: "16.65", y2: "16.65" })] }));
+}
+export function PlusIcon({ size = 20, class: className = '' }) {
+    return (_jsxs("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2.5", "stroke-linecap": "round", "stroke-linejoin": "round", class: className, "aria-hidden": "true", children: [_jsx("line", { x1: "12", y1: "5", x2: "12", y2: "19" }), _jsx("line", { x1: "5", y1: "12", x2: "19", y2: "12" })] }));
+}

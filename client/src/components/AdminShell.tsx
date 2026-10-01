@@ -18,6 +18,7 @@ import {
   RefreshIcon,
   ChevronRightIcon,
 } from './icons';
+import { AdminProvidersView } from './AdminProvidersView';
 
 export function AdminShell() {
   const user = currentUser.value;
@@ -279,26 +280,9 @@ export function AdminShell() {
           </div>
         )}
 
-        {/* Tab 2: Providers Entry Point Placeholder */}
+        {/* Tab 2: Provider Management View */}
         {!loading && activeTab === 'providers' && (
-          <div class="space-y-4">
-            <div>
-              <h2 class="text-xl font-bold text-text-main">
-                {t('admin.provider_management_title')}
-              </h2>
-            </div>
-            <div class="bg-surface border border-border rounded-lg p-8 text-center shadow-xs">
-              <div class="w-14 h-14 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center text-text-sub">
-                <ToolIcon size={28} />
-              </div>
-              <h3 class="text-base font-semibold text-text-main mb-1">
-                {t('admin.provider_management_title')}
-              </h3>
-              <p class="text-sm text-text-sub max-w-md mx-auto">
-                {t('admin.provider_management_placeholder')}
-              </p>
-            </div>
-          </div>
+          <AdminProvidersView />
         )}
 
         {/* Tab 3: Bookings Entry Point Placeholder */}
