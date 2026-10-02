@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "tsx tests/foundation.test.ts && tsx tests/auth.test.ts && tsx tests/category.test.ts && tsx tests/booking.test.ts && tsx tests/booking-status.test.ts && tsx tests/provider-feed.test.ts && tsx tests/provider-acceptance.test.ts && tsx tests/provider-rejection.test.ts && tsx tests/provider-progression.test.ts && tsx tests/provider-payment.test.ts && tsx tests/admin-foundation.test.ts && tsx tests/admin-provider-management.test.ts && tsx tests/admin-booking.test.ts && tsx tests/admin-provider-assignment.test.ts && tsx tests/provider-assigned-jobs.test.ts && tsx tests/admin-provider-assignment-ui.test.ts && tsx tests/customer-cancellation.test.ts",
+    "test": "tsx tests/foundation.test.ts && tsx tests/auth.test.ts && tsx tests/category.test.ts && tsx tests/booking.test.ts && tsx tests/booking-status.test.ts && tsx tests/provider-feed.test.ts && tsx tests/provider-acceptance.test.ts && tsx tests/provider-rejection.test.ts && tsx tests/provider-progression.test.ts && tsx tests/provider-payment.test.ts && tsx tests/admin-foundation.test.ts && tsx tests/admin-provider-management.test.ts && tsx tests/admin-booking.test.ts && tsx tests/admin-provider-assignment.test.ts && tsx tests/provider-assigned-jobs.test.ts && tsx tests/admin-provider-assignment-ui.test.ts && tsx tests/customer-cancellation.test.ts && tsx tests/customer-cancellation-ui.test.ts",
     "test:auth": "tsx tests/auth.test.ts",
     "test:category": "tsx tests/category.test.ts",
     "test:booking": "tsx tests/booking.test.ts",
@@ -24,6 +24,7 @@
     "test:admin-assignment-ui": "tsx tests/admin-provider-assignment-ui.test.ts",
     "test:provider-assigned-jobs": "tsx tests/provider-assigned-jobs.test.ts",
     "test:cancellation": "tsx tests/customer-cancellation.test.ts",
+    "test:cancellation-ui": "tsx tests/customer-cancellation-ui.test.ts",
     "db:migrate": "tsx src/db/migrator.ts",
     "db:verify": "tsx tests/db-verification.test.ts"
   },

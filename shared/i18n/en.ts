@@ -354,6 +354,20 @@ export const en: Record<TranslationKey, string> = {
   'detail.terminal_cancelled': 'Booking was cancelled',
   'detail.terminal_rejected': 'Technician unavailable, finding replacement',
   'detail.audio_note_title': 'Voice Note',
+  // Module 13: Customer Booking Cancellation
+  'detail.cancel_booking_btn': 'Cancel Booking',
+  'detail.cancel_modal_title': 'Cancel this booking?',
+  'detail.cancel_modal_desc': 'This action cannot be undone. You will need to make a new booking if needed.',
+  'detail.cancel_reason_label': 'Reason for cancellation (optional)',
+  'detail.cancel_reason_placeholder': 'e.g., Problem resolved, or will reschedule later',
+  'detail.cancel_reason_char_count': '{count}/255',
+  'detail.cancel_reason_max': 'Reason must not exceed 255 characters.',
+  'detail.keep_booking_btn': 'Keep Booking',
+  'detail.confirm_cancel_btn': 'Confirm Cancellation',
+  'detail.cancelling': 'Cancelling...',
+  'detail.cancel_success': 'Booking cancelled successfully.',
+  'detail.cancel_conflict_error': 'This booking can no longer be cancelled.',
+  'detail.cancel_conflict_desc': 'The booking status has changed. The page has been updated.',
 
   // Module 7: Provider App & Job Feed
   'provider.home_title': 'Available Jobs',

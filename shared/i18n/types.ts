@@ -354,6 +354,20 @@ export type TranslationKey =
   | 'detail.terminal_cancelled'
   | 'detail.terminal_rejected'
   | 'detail.audio_note_title'
+  // Module 13: Customer Booking Cancellation
+  | 'detail.cancel_booking_btn'
+  | 'detail.cancel_modal_title'
+  | 'detail.cancel_modal_desc'
+  | 'detail.cancel_reason_label'
+  | 'detail.cancel_reason_placeholder'
+  | 'detail.cancel_reason_char_count'
+  | 'detail.cancel_reason_max'
+  | 'detail.keep_booking_btn'
+  | 'detail.confirm_cancel_btn'
+  | 'detail.cancelling'
+  | 'detail.cancel_success'
+  | 'detail.cancel_conflict_error'
+  | 'detail.cancel_conflict_desc'
 
   // Module 7: Provider App & Job Feed
   | 'provider.home_title'

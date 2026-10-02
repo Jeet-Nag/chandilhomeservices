@@ -9,6 +9,18 @@ import {
   stopDetailAudio,
   isPlayingDetailAudio,
   detailAudioError,
+  isCancelDialogOpen,
+  cancelReason,
+  cancelReasonError,
+  isCancelling,
+  cancelError,
+  cancelSuccessMessage,
+  canCancelBooking,
+  openCancelDialog,
+  closeCancelDialog,
+  clearCancelSuccessMessage,
+  setCancelReason,
+  submitCancelBooking,
 } from '../state/booking';
 import { categories, fetchCategories } from '../state/categories';
 import { currentLanguage, t } from '../state/language';
@@ -25,6 +37,7 @@ import {
   CategoryIconRenderer,
   FileTextIcon,
   ClockIcon,
+  XIcon,
 } from './icons';
 
 function getStatusBadgeStyle(status: BookingStatus): { bg: string; text: string; dot: string } {
@@ -194,6 +207,24 @@ export function BookingDetailScreen() {
         {/* Booking Details Content */}
         {booking && (
           <>
+            {/* Cancellation Success Banner */}
+            {cancelSuccessMessage.value && (
+              <div class="bg-green-50 border border-green-200 text-action-active rounded-lg p-3 text-xs flex items-center justify-between shadow-xs">
+                <div class="flex items-center space-x-2">
+                  <CheckIcon size={16} class="text-action shrink-0" />
+                  <span class="font-bold">{cancelSuccessMessage.value}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearCancelSuccessMessage}
+                  class="text-action hover:text-action-active p-1 rounded min-h-[32px] min-w-[32px] flex items-center justify-center"
+                  aria-label="Dismiss"
+                >
+                  <XIcon size={14} />
+                </button>
+              </div>
+            )}
+
             {/* 1. Status & Summary Header Card */}
             <section class="bg-surface border border-border rounded-lg p-4 shadow-sm space-y-3">
               <div class="flex items-start justify-between">
@@ -437,8 +468,19 @@ export function BookingDetailScreen() {
               </div>
             </section>
 
-            {/* Back Button CTA */}
-            <div>
+            {/* Action Buttons: Cancellation (if eligible) & Back */}
+            <div class="space-y-3 pt-2">
+              {canCancelBooking(booking.status) && (
+                <button
+                  type="button"
+                  onClick={() => openCancelDialog()}
+                  class="w-full min-h-[48px] px-4 py-3 bg-red-50 hover:bg-red-100 border border-red-200 text-danger font-bold rounded-lg text-sm transition-colors flex items-center justify-center space-x-2 shadow-xs"
+                >
+                  <XIcon size={18} class="text-danger" />
+                  <span>{t('detail.cancel_booking_btn')}</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => closeBookingDetail()}
@@ -449,6 +491,118 @@ export function BookingDetailScreen() {
               </button>
             </div>
           </>
+        )}
+
+        {/* Customer Booking Cancellation Dialog */}
+        {isCancelDialogOpen.value && booking && (
+          <div
+            class="fixed inset-0 z-60 overflow-y-auto bg-black/60 flex items-center justify-center p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cancel-dialog-title"
+          >
+            <div class="relative bg-surface border border-border rounded-xl max-w-md w-full p-5 shadow-2xl space-y-4 my-8">
+              {/* Dialog Header */}
+              <div class="flex items-start justify-between pb-3 border-b border-border">
+                <div class="flex items-center space-x-3">
+                  <div class="w-10 h-10 rounded-full bg-red-100 text-danger flex items-center justify-center shrink-0">
+                    <AlertCircleIcon size={22} />
+                  </div>
+                  <div>
+                    <h3 id="cancel-dialog-title" class="text-base font-bold text-text-main leading-tight">
+                      {t('detail.cancel_modal_title')}
+                    </h3>
+                    <div class="text-xs text-text-sub font-mono mt-0.5">
+                      {shortId}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeCancelDialog}
+                  disabled={isCancelling.value}
+                  class="p-2 -mr-2 text-text-sub hover:text-text-main rounded-lg min-h-[48px] min-w-[48px] flex items-center justify-center"
+                  aria-label={t('app.cancel')}
+                >
+                  <XIcon size={18} />
+                </button>
+              </div>
+
+              {/* Warning Notice */}
+              <div class="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-danger leading-relaxed">
+                {t('detail.cancel_modal_desc')}
+              </div>
+
+              {/* Error Banner */}
+              {cancelError.value && (
+                <div class="p-3 rounded-lg bg-red-50 border border-red-200 text-danger text-xs flex items-start space-x-2">
+                  <AlertCircleIcon size={16} class="shrink-0 mt-0.5" />
+                  <div class="flex-1 font-semibold">{cancelError.value}</div>
+                </div>
+              )}
+
+              {/* Optional Reason Input */}
+              <div class="space-y-1.5">
+                <label for="cancel-reason-input" class="block text-xs font-bold text-text-main">
+                  {t('detail.cancel_reason_label')}
+                </label>
+                <textarea
+                  id="cancel-reason-input"
+                  rows={3}
+                  value={cancelReason.value}
+                  onInput={(e) => setCancelReason((e.target as HTMLTextAreaElement).value)}
+                  maxLength={255}
+                  disabled={isCancelling.value}
+                  placeholder={t('detail.cancel_reason_placeholder')}
+                  class={`w-full p-3 bg-background border rounded-lg text-xs text-text-main focus:outline-none focus:ring-2 ${
+                    cancelReasonError.value
+                      ? 'border-danger focus:ring-danger'
+                      : 'border-border focus:ring-brand'
+                  }`}
+                />
+                <div class="flex justify-between items-center text-[11px]">
+                  {cancelReasonError.value ? (
+                    <span class="text-danger font-medium">{cancelReasonError.value}</span>
+                  ) : (
+                    <span></span>
+                  )}
+                  <span class="text-text-sub ml-auto">
+                    {t('detail.cancel_reason_char_count', {
+                      count: cancelReason.value.length,
+                    })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Dialog Action Buttons */}
+              <div class="pt-2 flex flex-col sm:flex-row items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={closeCancelDialog}
+                  disabled={isCancelling.value}
+                  class="min-h-[48px] px-4 py-2.5 bg-background hover:bg-slate-100 border border-border text-text-main text-xs font-semibold rounded-lg transition-colors w-full sm:w-auto flex items-center justify-center"
+                >
+                  {t('detail.keep_booking_btn')}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => submitCancelBooking()}
+                  disabled={isCancelling.value}
+                  class="min-h-[48px] px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-xs flex items-center justify-center space-x-2 transition-colors w-full sm:w-auto"
+                >
+                  {isCancelling.value ? (
+                    <>
+                      <SpinnerIcon size={14} class="animate-spin" />
+                      <span>{t('detail.cancelling')}</span>
+                    </>
+                  ) : (
+                    <span>{t('detail.confirm_cancel_btn')}</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>

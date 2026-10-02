@@ -1,5 +1,5 @@
 import { signal, computed } from '@preact/signals';
-import { Booking, BookingDetail, ServiceCategory, ApiResponse } from '@shared';
+import { Booking, BookingDetail, BookingStatus, ServiceCategory, ApiResponse } from '@shared';
 import { authToken, handleSessionExpired } from './auth';
 import { currentLanguage } from './language';
 
@@ -516,6 +516,8 @@ export function openBookingHistory(): void {
 
 export function openBookingDetail(id: string): void {
   stopDetailAudio();
+  closeCancelDialog();
+  clearCancelSuccessMessage();
   selectedBookingId.value = id;
   activeBookingDetail.value = null;
   bookingStep.value = 'status';
@@ -530,6 +532,200 @@ export function refreshCurrentBooking(): void {
 
 export function closeBookingDetail(): void {
   stopDetailAudio();
+  closeCancelDialog();
+  clearCancelSuccessMessage();
   bookingStep.value = 'history';
+}
+
+// ==========================================
+// MODULE 13: CUSTOMER BOOKING CANCELLATION
+// ==========================================
+
+export const isCancelDialogOpen = signal<boolean>(false);
+export const cancelReason = signal<string>('');
+export const cancelReasonError = signal<string | null>(null);
+export const isCancelling = signal<boolean>(false);
+export const cancelError = signal<string | null>(null);
+export const cancelSuccessMessage = signal<string | null>(null);
+
+/**
+ * Determines whether a booking can be cancelled by the customer.
+ * Permitted ONLY for:
+ *   - SERVICE_REQUESTED
+ *   - PROVIDER_ASSIGNED
+ *   - PROVIDER_ACCEPTED
+ * strictly disallowing any in-progress, completed, or terminal statuses.
+ */
+export function canCancelBooking(status: BookingStatus): boolean {
+  return (
+    status === 'SERVICE_REQUESTED' ||
+    status === 'PROVIDER_ASSIGNED' ||
+    status === 'PROVIDER_ACCEPTED'
+  );
+}
+
+export function openCancelDialog(): void {
+  cancelReason.value = '';
+  cancelReasonError.value = null;
+  cancelError.value = null;
+  cancelSuccessMessage.value = null;
+  isCancelDialogOpen.value = true;
+}
+
+export function closeCancelDialog(): void {
+  if (isCancelling.value) return; // Prevent dismissing while request is in-flight
+  isCancelDialogOpen.value = false;
+  cancelReason.value = '';
+  cancelReasonError.value = null;
+  cancelError.value = null;
+}
+
+export function clearCancelSuccessMessage(): void {
+  cancelSuccessMessage.value = null;
+}
+
+export function setCancelReason(val: string): void {
+  cancelReason.value = val;
+  if (val.length > 255) {
+    cancelReasonError.value = currentLanguage.value === 'hi'
+      ? 'रद्दीकरण का कारण 255 अक्षरों से अधिक नहीं होना चाहिए।'
+      : 'Reason must not exceed 255 characters.';
+  } else {
+    cancelReasonError.value = null;
+  }
+}
+
+export function validateCancelReason(val: string): boolean {
+  if (val.length > 255) {
+    cancelReasonError.value = currentLanguage.value === 'hi'
+      ? 'रद्दीकरण का कारण 255 अक्षरों से अधिक नहीं होना चाहिए।'
+      : 'Reason must not exceed 255 characters.';
+    return false;
+  }
+  cancelReasonError.value = null;
+  return true;
+}
+
+export async function submitCancelBooking(): Promise<boolean> {
+  const booking = activeBookingDetail.value;
+  if (!booking) return false;
+
+  // Double-submission protection
+  if (isCancelling.value) return false;
+
+  const token = authToken.value;
+  if (!token) {
+    handleSessionExpired();
+    return false;
+  }
+
+  // Reason length validation
+  if (!validateCancelReason(cancelReason.value)) {
+    return false;
+  }
+
+  const trimmed = cancelReason.value.trim();
+  const payload: { reason?: string } = trimmed.length > 0 ? { reason: trimmed } : {};
+
+  isCancelling.value = true;
+  cancelError.value = null;
+
+  try {
+    const res = await fetch(`/api/bookings/${booking.id}/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.status === 401) {
+      handleSessionExpired();
+      return false;
+    }
+
+    if (res.status === 409) {
+      // Status race condition: booking progressed or was already cancelled
+      // Re-fetch latest booking from server to update UI authoritative state
+      await fetchBookingDetail(booking.id);
+      cancelError.value = currentLanguage.value === 'hi'
+        ? 'यह बुकिंग अब रद्द नहीं की जा सकती। स्थिति बदल गई है।'
+        : 'This booking can no longer be cancelled. Status has changed.';
+      return false;
+    }
+
+    if (res.status === 403) {
+      cancelError.value = currentLanguage.value === 'hi'
+        ? 'इस बुकिंग को रद्द करने की अनुमति नहीं है।'
+        : 'Access denied to cancel this booking.';
+      return false;
+    }
+
+    if (res.status === 404) {
+      cancelError.value = currentLanguage.value === 'hi'
+        ? 'बुकिंग नहीं मिली।'
+        : 'Booking not found.';
+      return false;
+    }
+
+    if (res.status === 400) {
+      const errBody: ApiResponse = await res.json().catch(() => ({ success: false }));
+      cancelError.value = currentLanguage.value === 'hi'
+        ? (errBody.error?.messageHi || 'रद्दीकरण का कारण अमान्य है।')
+        : (errBody.error?.messageEn || 'Invalid cancellation request.');
+      return false;
+    }
+
+    if (!res.ok) {
+      cancelError.value = currentLanguage.value === 'hi'
+        ? 'बुकिंग रद्द करने में समस्या हुई। कृपया पुनः प्रयास करें।'
+        : 'Failed to cancel booking. Please retry.';
+      return false;
+    }
+
+    const body: ApiResponse<Booking> = await res.json();
+    if (!body.success || !body.data) {
+      cancelError.value = currentLanguage.value === 'hi'
+        ? (body.error?.messageHi || 'बुकिंग रद्द करने में असमर्थ।')
+        : (body.error?.messageEn || 'Unable to cancel booking.');
+      return false;
+    }
+
+    const updatedBooking = body.data;
+
+    // Update active booking detail
+    if (activeBookingDetail.value && activeBookingDetail.value.id === updatedBooking.id) {
+      activeBookingDetail.value = {
+        ...activeBookingDetail.value,
+        ...updatedBooking,
+      };
+    }
+
+    // Reconcile booking history list if loaded
+    bookingHistory.value = bookingHistory.value.map((b) =>
+      b.id === updatedBooking.id ? { ...b, ...updatedBooking } : b
+    );
+
+    // Close modal & set success message
+    isCancelDialogOpen.value = false;
+    cancelReason.value = '';
+    cancelReasonError.value = null;
+    cancelSuccessMessage.value = currentLanguage.value === 'hi'
+      ? 'बुकिंग सफलतापूर्वक रद्द कर दी गई।'
+      : 'Booking cancelled successfully.';
+
+    // Fetch full detail in background to populate latest audit log in statusLogs
+    fetchBookingDetail(booking.id).catch(() => {});
+
+    return true;
+  } catch {
+    cancelError.value = currentLanguage.value === 'hi'
+      ? 'नेटवर्क समस्या। कृपया पुनः प्रयास करें।'
+      : 'Network error. Please retry.';
+    return false;
+  } finally {
+    isCancelling.value = false;
+  }
 }
 
