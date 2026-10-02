@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { db } from '../db';
 import { authenticate, requireRole } from '../middleware/auth';
 import { audioService } from '../services/audio.service';
-import { ApiResponse, Booking, BookingDetail, BookingStatus, CHANDIL_LOCALITIES } from '@shared';
+import { ApiResponse, Booking, BookingDetail, BookingStatus, CHANDIL_LOCALITIES, canTransition } from '@shared';
 
 interface DbBookingRow {
   id: string;
@@ -533,5 +533,199 @@ export const bookingRoutes: FastifyPluginAsync = async (app: FastifyInstance) =>
       success: true,
       data: result.rows.map(mapBookingRow),
     });
+  });
+
+  /**
+   * POST /api/bookings/:id/cancel
+   * Cancels an active customer booking.
+   * RBAC: Strictly restricted to 'customer' role.
+   * State Machine: Transitions SERVICE_REQUESTED, PROVIDER_ASSIGNED, or PROVIDER_ACCEPTED
+   *                strictly to CANCELLED_BY_CUSTOMER via canTransition().
+   * Invariants:
+   *   - Preserves provider_id (historical attribution maintained).
+   *   - Preserves accepted_at, started_at, completed_at timestamps.
+   *   - Preserves visiting_fee, final_amount, payment_method, payment_collected.
+   *   - Atomically records status log in booking_status_logs.
+   * Concurrency: Uses row-level lock (FOR UPDATE) inside transaction.
+   */
+  app.post<{
+    Params: { id: string };
+    Body?: { reason?: string };
+  }>('/:id/cancel', {
+    preHandler: [authenticate, requireRole(['customer'])],
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const customerId = request.user.id;
+
+    // 1. Validate UUID format
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      const response: ApiResponse = {
+        success: false,
+        error: {
+          code: 'INVALID_ID',
+          messageEn: 'Invalid booking ID format.',
+          messageHi: 'अमान्य बुकिंग आईडी प्रारूप।',
+        },
+      };
+      return reply.status(400).send(response);
+    }
+
+    // 2. Validate optional cancellation reason
+    let trimmedReason: string | null = null;
+    if (request.body && request.body.reason !== undefined) {
+      const rawReason = request.body.reason;
+      if (typeof rawReason !== 'string') {
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            messageEn: 'Cancellation reason must be a string.',
+            messageHi: 'रद्दीकरण का कारण टेक्स्ट होना चाहिए।',
+          },
+        };
+        return reply.status(400).send(response);
+      }
+
+      trimmedReason = rawReason.trim();
+
+      if (trimmedReason.length === 0) {
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            messageEn: 'Cancellation reason cannot be empty.',
+            messageHi: 'रद्दीकरण का कारण खाली नहीं हो सकता।',
+          },
+        };
+        return reply.status(400).send(response);
+      }
+
+      if (trimmedReason.length > 255) {
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            messageEn: 'Cancellation reason must not exceed 255 characters.',
+            messageHi: 'रद्दीकरण का कारण 255 अक्षरों से अधिक नहीं होना चाहिए।',
+          },
+        };
+        return reply.status(400).send(response);
+      }
+    }
+
+    const pool = db.getPool();
+    if (!pool) {
+      const response: ApiResponse = {
+        success: false,
+        error: {
+          code: 'DATABASE_UNAVAILABLE',
+          messageEn: 'Database connection is unavailable.',
+          messageHi: 'डेटाबेस कनेक्शन अनुपलब्ध है।',
+        },
+      };
+      return reply.status(500).send(response);
+    }
+
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // 3. Lock booking row for update
+      const lockRes = await client.query<DbBookingRow>(
+        'SELECT * FROM bookings WHERE id = $1 FOR UPDATE',
+        [id]
+      );
+
+      if (lockRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: 'BOOKING_NOT_FOUND',
+            messageEn: 'Booking not found.',
+            messageHi: 'बुकिंग नहीं मिली।',
+          },
+        };
+        return reply.status(404).send(response);
+      }
+
+      const currentBooking = lockRes.rows[0];
+
+      // 4. Verify ownership
+      if (currentBooking.customer_id !== customerId) {
+        await client.query('ROLLBACK');
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: 'FORBIDDEN',
+            messageEn: 'Access denied to this booking.',
+            messageHi: 'इस बुकिंग तक पहुँच अस्वीकृत है।',
+          },
+        };
+        return reply.status(403).send(response);
+      }
+
+      // 5. Verify valid state transition using canTransition()
+      if (!canTransition(currentBooking.status, 'CANCELLED_BY_CUSTOMER', 'customer')) {
+        await client.query('ROLLBACK');
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: 'INVALID_STATUS_TRANSITION',
+            messageEn: `Cannot cancel booking in status ${currentBooking.status}.`,
+            messageHi: `स्थिति ${currentBooking.status} में बुकिंग रद्द नहीं की जा सकती।`,
+          },
+        };
+        return reply.status(409).send(response);
+      }
+
+      // 6. Update booking status to CANCELLED_BY_CUSTOMER
+      const updateRes = await client.query<DbBookingRow>(
+        `UPDATE bookings
+         SET status = 'CANCELLED_BY_CUSTOMER',
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id]
+      );
+
+      const updatedBooking = updateRes.rows[0];
+
+      // 7. Insert audit log
+      const auditNote = trimmedReason || 'Cancelled by customer';
+      await client.query(
+        `INSERT INTO booking_status_logs (
+           booking_id,
+           from_status,
+           to_status,
+           changed_by,
+           notes
+         ) VALUES ($1, $2, 'CANCELLED_BY_CUSTOMER', $3, $4)`,
+        [id, currentBooking.status, customerId, auditNote]
+      );
+
+      await client.query('COMMIT');
+
+      const response: ApiResponse<Booking> = {
+        success: true,
+        data: mapBookingRow(updatedBooking),
+      };
+      return reply.status(200).send(response);
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      request.log.error(err, 'Failed to cancel customer booking in transaction');
+      const response: ApiResponse = {
+        success: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          messageEn: 'Failed to cancel booking. Please retry.',
+          messageHi: 'बुकिंग रद्द करने में असमर्थ। कृपया पुनः प्रयास करें।',
+        },
+      };
+      return reply.status(500).send(response);
+    } finally {
+      client.release();
+    }
   });
 };
