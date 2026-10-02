@@ -23,18 +23,22 @@ import {
   FileTextIcon,
 } from './icons';
 import { ServiceCategory } from '@shared';
-
-// Chandil Dispatch Helpline Contacts
-const HELPLINE_PHONE = '+918000000000';
-const WHATSAPP_URL = 'https://wa.me/918000000000?text=Hello%20Chandil%20Home%20Services';
+import { supportPhone, supportWhatsApp, fetchSupportConfig } from '../state/config';
 
 export function CustomerHome() {
   useEffect(() => {
     fetchCategories();
+    fetchSupportConfig();
   }, []);
 
   const lang = currentLanguage.value || 'en';
   const user = currentUser.value;
+  const phone = supportPhone.value;
+  const rawWhatsApp = supportWhatsApp.value;
+  const cleanWhatsApp = rawWhatsApp ? rawWhatsApp.replace(/[^0-9]/g, '') : null;
+  const whatsappUrl = cleanWhatsApp
+    ? `https://wa.me/${cleanWhatsApp}?text=${encodeURIComponent('Hello Chandil Home Services')}`
+    : null;
 
   const getCategoryTitle = (cat: ServiceCategory) => {
     return lang === 'hi' ? cat.titleHi : cat.titleEn;
@@ -284,24 +288,46 @@ export function CustomerHome() {
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {/* Direct Call Button */}
-            <a
-              href={`tel:${HELPLINE_PHONE}`}
-              class="min-h-[48px] px-3 py-2.5 border-2 border-brand text-brand hover:bg-brand hover:text-white rounded-lg font-semibold text-xs transition-colors flex items-center justify-center space-x-2 text-center"
-            >
-              <PhoneIcon size={18} />
-              <span>{t('home.call_to_book')}</span>
-            </a>
+            {phone ? (
+              <a
+                href={`tel:${phone}`}
+                class="min-h-[48px] px-3 py-2.5 border-2 border-brand text-brand hover:bg-brand hover:text-white rounded-lg font-semibold text-xs transition-colors flex items-center justify-center space-x-2 text-center"
+              >
+                <PhoneIcon size={18} />
+                <span>{t('home.call_to_book')}</span>
+              </a>
+            ) : (
+              <button
+                type="button"
+                disabled
+                class="min-h-[48px] px-3 py-2.5 border-2 border-slate-200 text-slate-400 rounded-lg font-semibold text-xs flex items-center justify-center space-x-2 text-center cursor-not-allowed opacity-60"
+              >
+                <PhoneIcon size={18} />
+                <span>{t('home.call_to_book')}</span>
+              </button>
+            )}
 
             {/* Direct WhatsApp Button */}
-            <a
-              href={WHATSAPP_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="min-h-[48px] px-3 py-2.5 bg-action hover:bg-action-active text-white rounded-lg font-semibold text-xs transition-colors flex items-center justify-center space-x-2 text-center"
-            >
-              <WhatsAppIcon size={18} />
-              <span>{t('home.whatsapp_to_book')}</span>
-            </a>
+            {whatsappUrl ? (
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="min-h-[48px] px-3 py-2.5 bg-action hover:bg-action-active text-white rounded-lg font-semibold text-xs transition-colors flex items-center justify-center space-x-2 text-center"
+              >
+                <WhatsAppIcon size={18} />
+                <span>{t('home.whatsapp_to_book')}</span>
+              </a>
+            ) : (
+              <button
+                type="button"
+                disabled
+                class="min-h-[48px] px-3 py-2.5 bg-slate-200 text-slate-400 rounded-lg font-semibold text-xs flex items-center justify-center space-x-2 text-center cursor-not-allowed opacity-60"
+              >
+                <WhatsAppIcon size={18} />
+                <span>{t('home.whatsapp_to_book')}</span>
+              </button>
+            )}
           </div>
         </section>
       </main>

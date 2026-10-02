@@ -34,6 +34,7 @@ export const paymentCollectSuccess = signal<boolean>(false);
 
 
 let activeAudioElement: HTMLAudioElement | null = null;
+let currentJobAudioObjectUrl: string | null = null;
 
 export function stopJobAudio(): void {
   if (activeAudioElement) {
@@ -45,11 +46,19 @@ export function stopJobAudio(): void {
     }
     activeAudioElement = null;
   }
+  if (currentJobAudioObjectUrl && typeof URL !== 'undefined' && URL.revokeObjectURL) {
+    try {
+      URL.revokeObjectURL(currentJobAudioObjectUrl);
+    } catch {
+      // Ignore
+    }
+    currentJobAudioObjectUrl = null;
+  }
   isPlayingJobAudio.value = false;
   jobAudioError.value = null;
 }
 
-export function toggleJobAudio(audioUrl: string): void {
+export async function toggleJobAudio(audioUrl: string): Promise<void> {
   jobAudioError.value = null;
 
   if (isPlayingJobAudio.value && activeAudioElement) {
@@ -60,28 +69,38 @@ export function toggleJobAudio(audioUrl: string): void {
   stopJobAudio();
 
   try {
-    const audio = new Audio(audioUrl);
+    const token = authToken.value;
+    const res = await fetch(audioUrl, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (!res.ok) {
+      jobAudioError.value = t('provider.audio_playback_error');
+      return;
+    }
+
+    const blob = await res.blob();
+    const objectUrl = (typeof URL !== 'undefined' && URL.createObjectURL)
+      ? URL.createObjectURL(blob)
+      : audioUrl;
+    currentJobAudioObjectUrl = objectUrl;
+
+    const audio = new Audio(objectUrl);
     activeAudioElement = audio;
-    isPlayingJobAudio.value = true;
 
     audio.onended = () => {
-      isPlayingJobAudio.value = false;
-      activeAudioElement = null;
+      stopJobAudio();
     };
 
     audio.onerror = () => {
-      isPlayingJobAudio.value = false;
-      activeAudioElement = null;
+      stopJobAudio();
       jobAudioError.value = t('provider.audio_playback_error');
     };
 
-    audio.play().catch(() => {
-      isPlayingJobAudio.value = false;
-      activeAudioElement = null;
-      jobAudioError.value = t('provider.audio_playback_error');
-    });
+    await audio.play();
+    isPlayingJobAudio.value = true;
   } catch {
-    isPlayingJobAudio.value = false;
+    stopJobAudio();
     jobAudioError.value = t('provider.audio_playback_error');
   }
 }

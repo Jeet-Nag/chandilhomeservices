@@ -338,6 +338,7 @@ async function runBookingStatusTests() {
   const streamAudioRes = await app.inject({
     method: 'GET',
     url: bookingBAudioUrl,
+    headers: { authorization: `Bearer ${token1}` },
   });
   assert(streamAudioRes.statusCode === 200, 'Audio file streams via GET /api/audio/:filename');
   assert(streamAudioRes.rawPayload.length === 10000, 'Streamed audio length matches exact uploaded binary size');

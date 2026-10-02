@@ -142,16 +142,26 @@ async function runBookingTests() {
   assert(typeof savedAudio.audioUrl === 'string' && savedAudio.audioUrl.startsWith('/api/audio/'), 'Audio saved with valid URL route');
   assert(savedAudio.byteSize === 30000, 'Saved audio file on disk matches byte size');
 
-  // Test audio retrieval route
+  // Insert temporary booking to satisfy audio authorization
+  const tempKey = `temp-audio-test-${Date.now()}`;
+  await pool.query(
+    `INSERT INTO bookings (idempotency_key, customer_id, category_id, area_locality, text_description, audio_url, visiting_fee)
+     VALUES ($1, $2, 'electrician', 'chandil-bazar', 'Audio streaming test', $3, 99.00)`,
+    [tempKey, userAId, savedAudio.audioUrl]
+  );
+
+  // Test audio retrieval route with authorized token
   const audioStreamRes = await app.inject({
     method: 'GET',
     url: savedAudio.audioUrl,
+    headers: { authorization: `Bearer ${tokenA}` },
   });
   assert(audioStreamRes.statusCode === 200, 'GET /api/audio/:filename streams audio with HTTP 200');
   assert(audioStreamRes.headers['content-type'] === 'audio/webm', 'Content-Type header is audio/webm');
   assert(audioStreamRes.rawPayload.length === 30000, 'Streamed audio bytes match original size');
 
-  // Clean up test file
+  // Clean up test booking and file
+  await pool.query('DELETE FROM bookings WHERE idempotency_key = $1', [tempKey]);
   await audioService.deleteAudioFile(savedAudio.filename);
 
   console.log('\n--- 2. Authorization & RBAC Boundaries ---');
@@ -353,6 +363,7 @@ async function runBookingTests() {
   const stream30Res = await app.inject({
     method: 'GET',
     url: b30.audioUrl,
+    headers: { authorization: `Bearer ${tokenA}` },
   });
   assert(stream30Res.statusCode === 200, 'GET 30s audio returns HTTP 200');
   assert(stream30Res.headers['content-type'] === 'audio/webm', '30s audio stream has Content-Type audio/webm');
@@ -628,6 +639,7 @@ async function runBookingTests() {
   if (failed > 0) {
     process.exit(1);
   }
+  process.exit(0);
 }
 
 runBookingTests().catch((err) => {

@@ -358,45 +358,70 @@ export const detailAudioError = signal<boolean>(false);
 
 let detailAudioElement: HTMLAudioElement | null = null;
 
+let currentDetailAudioObjectUrl: string | null = null;
+
 export function stopDetailAudio(): void {
   if (detailAudioElement) {
-    detailAudioElement.pause();
+    try {
+      detailAudioElement.pause();
+    } catch {
+      // ignore
+    }
     detailAudioElement = null;
+  }
+  if (currentDetailAudioObjectUrl && typeof URL !== 'undefined' && URL.revokeObjectURL) {
+    try {
+      URL.revokeObjectURL(currentDetailAudioObjectUrl);
+    } catch {
+      // ignore
+    }
+    currentDetailAudioObjectUrl = null;
   }
   isPlayingDetailAudio.value = false;
 }
 
-export function toggleDetailAudio(audioUrl: string): void {
+export async function toggleDetailAudio(audioUrl: string): Promise<void> {
   detailAudioError.value = false;
 
   if (isPlayingDetailAudio.value && detailAudioElement) {
-    detailAudioElement.pause();
-    isPlayingDetailAudio.value = false;
+    stopDetailAudio();
     return;
   }
 
   stopDetailAudio();
 
   try {
-    const audio = new Audio(audioUrl);
+    const token = authToken.value;
+    const res = await fetch(audioUrl, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (!res.ok) {
+      detailAudioError.value = true;
+      return;
+    }
+
+    const blob = await res.blob();
+    const objectUrl = (typeof URL !== 'undefined' && URL.createObjectURL)
+      ? URL.createObjectURL(blob)
+      : audioUrl;
+    currentDetailAudioObjectUrl = objectUrl;
+
+    const audio = new Audio(objectUrl);
     detailAudioElement = audio;
 
     audio.onended = () => {
-      isPlayingDetailAudio.value = false;
+      stopDetailAudio();
     };
     audio.onerror = () => {
-      isPlayingDetailAudio.value = false;
+      stopDetailAudio();
       detailAudioError.value = true;
     };
 
-    audio.play().then(() => {
-      isPlayingDetailAudio.value = true;
-    }).catch(() => {
-      isPlayingDetailAudio.value = false;
-      detailAudioError.value = true;
-    });
+    await audio.play();
+    isPlayingDetailAudio.value = true;
   } catch {
-    isPlayingDetailAudio.value = false;
+    stopDetailAudio();
     detailAudioError.value = true;
   }
 }

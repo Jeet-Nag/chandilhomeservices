@@ -121,14 +121,29 @@ export function validateCancelReason(reasonText) {
     }
     return null;
 }
+let currentAdminAudioObjectUrl = null;
 /**
  * Stop any currently playing audio in booking detail.
  */
 export function stopDetailAudio() {
     if (detailAudioElement) {
-        detailAudioElement.pause();
-        detailAudioElement.currentTime = 0;
+        try {
+            detailAudioElement.pause();
+            detailAudioElement.currentTime = 0;
+        }
+        catch {
+            // Ignore
+        }
         detailAudioElement = null;
+    }
+    if (currentAdminAudioObjectUrl && typeof URL !== 'undefined' && URL.revokeObjectURL) {
+        try {
+            URL.revokeObjectURL(currentAdminAudioObjectUrl);
+        }
+        catch {
+            // Ignore
+        }
+        currentAdminAudioObjectUrl = null;
     }
     isPlayingDetailAudio.value = false;
     detailAudioError.value = null;
@@ -136,36 +151,44 @@ export function stopDetailAudio() {
 /**
  * Toggle audio playback for active booking detail.
  */
-export function toggleDetailAudio(audioUrl) {
+export async function toggleDetailAudio(audioUrl) {
     const url = audioUrl || selectedBookingDetail.value?.booking.audioUrl;
     if (!url)
         return;
     if (isPlayingDetailAudio.value && detailAudioElement) {
-        detailAudioElement.pause();
-        isPlayingDetailAudio.value = false;
+        stopDetailAudio();
         return;
     }
     stopDetailAudio();
     try {
-        const audio = new Audio(url);
+        const token = authToken.value;
+        const res = await fetch(url, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) {
+            detailAudioError.value = t('admin.audio_playback_error');
+            return;
+        }
+        const blob = await res.blob();
+        const objectUrl = (typeof URL !== 'undefined' && URL.createObjectURL)
+            ? URL.createObjectURL(blob)
+            : url;
+        currentAdminAudioObjectUrl = objectUrl;
+        const audio = new Audio(objectUrl);
         detailAudioElement = audio;
         audio.onended = () => {
-            isPlayingDetailAudio.value = false;
+            stopDetailAudio();
         };
         audio.onerror = () => {
-            isPlayingDetailAudio.value = false;
+            stopDetailAudio();
             detailAudioError.value = t('admin.audio_playback_error');
         };
-        audio.play().then(() => {
-            isPlayingDetailAudio.value = true;
-            detailAudioError.value = null;
-        }).catch(() => {
-            isPlayingDetailAudio.value = false;
-            detailAudioError.value = t('admin.audio_playback_error');
-        });
+        await audio.play();
+        isPlayingDetailAudio.value = true;
+        detailAudioError.value = null;
     }
     catch {
-        isPlayingDetailAudio.value = false;
+        stopDetailAudio();
         detailAudioError.value = t('admin.audio_playback_error');
     }
 }

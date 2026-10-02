@@ -23,3 +23,8 @@ export type ApiErrorCode =
   | 'JOB_NO_LONGER_ASSIGNED'
   | 'INTERNAL_ERROR'
   | 'VALIDATION_ERROR';
+
+export interface SupportConfig {
+  supportPhone: string | null;
+  supportWhatsApp: string | null;
+}

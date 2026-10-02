@@ -10,31 +10,70 @@ import { bookingRoutes } from './routes/booking.routes';
 import { audioRoutes } from './routes/audio.routes';
 import { providerRoutes } from './routes/provider.routes';
 import { adminRoutes } from './routes/admin.routes';
+import { configRoutes } from './routes/config.routes';
 import { ApiResponse } from '@shared';
 
-export async function buildApp(): Promise<FastifyInstance> {
+export function resolveCorsOrigin(environment: string, corsOrigin?: string): boolean | string[] {
+  if (environment !== 'production') {
+    return true; // preserve development flexibility
+  }
+
+  if (!corsOrigin || corsOrigin.trim().length === 0) {
+    // Fail safely in production if CORS_ORIGIN is missing
+    return false;
+  }
+
+  const allowedOrigins = corsOrigin
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
+
+  if (allowedOrigins.length === 0) {
+    return false;
+  }
+
+  return allowedOrigins;
+}
+
+export interface BuildAppOptions {
+  customEnv?: {
+    NODE_ENV?: 'development' | 'production' | 'test';
+    CORS_ORIGIN?: string;
+    JWT_SECRET?: string;
+  };
+}
+
+export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstance> {
+  const currentEnv = options?.customEnv?.NODE_ENV || env.NODE_ENV;
+  const currentCorsOrigin = options?.customEnv?.CORS_ORIGIN !== undefined
+    ? options.customEnv.CORS_ORIGIN
+    : env.CORS_ORIGIN;
+  const currentJwtSecret = options?.customEnv?.JWT_SECRET || env.JWT_SECRET;
+
   const app = Fastify({
-    logger: env.NODE_ENV !== 'test',
+    logger: currentEnv !== 'test',
   });
 
   // CORS configuration
   await app.register(cors, {
-    origin: true,
+    origin: resolveCorsOrigin(currentEnv, currentCorsOrigin),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   // JWT configuration
   await app.register(fastifyJwt, {
-    secret: env.JWT_SECRET,
+    secret: currentJwtSecret,
   });
 
-  // Register Auth, Category, Booking, Audio, Provider, Admin and RBAC routes
+  // Register Auth, Category, Booking, Audio, Provider, Admin, Config and RBAC routes
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(categoryRoutes, { prefix: '/api/categories' });
   await app.register(bookingRoutes, { prefix: '/api/bookings' });
   await app.register(audioRoutes, { prefix: '/api/audio' });
   await app.register(providerRoutes, { prefix: '/api/provider' });
   await app.register(adminRoutes, { prefix: '/api/admin' });
+  await app.register(configRoutes, { prefix: '/api/config' });
   await app.register(rbacTestRoutes);
 
   // Health check endpoint

@@ -287,6 +287,7 @@ async function runProviderFeedTests() {
   const audioStreamRes = await app.inject({
     method: 'GET',
     url: `/api/audio/${filename}`,
+    headers: { authorization: `Bearer ${customerToken}` },
   });
   testAssert(audioStreamRes.statusCode === 200, 'Saved audio streams via GET /api/audio/:filename (Requirement 13)');
 
@@ -294,6 +295,7 @@ async function runProviderFeedTests() {
   const badAudioRes = await app.inject({
     method: 'GET',
     url: '/api/audio/non-existent-recording.webm',
+    headers: { authorization: `Bearer ${customerToken}` },
   });
   testAssert(badAudioRes.statusCode === 404, 'Audio playback failure is handled cleanly with 404 (Requirement 14)');
 
