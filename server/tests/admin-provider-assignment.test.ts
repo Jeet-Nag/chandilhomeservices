@@ -60,7 +60,6 @@ async function runAdminProviderAssignmentTests() {
     await pool!.query(
       `DELETE FROM bookings WHERE idempotency_key LIKE 'adm-asgn-%'`
     );
-    await pool!.query('DELETE FROM otp_requests WHERE phone = ANY($1)', [allTestPhones]);
     await pool!.query(
       `DELETE FROM provider_profiles WHERE user_id IN (SELECT id FROM users WHERE phone = ANY($1))`,
       [allTestPhones]

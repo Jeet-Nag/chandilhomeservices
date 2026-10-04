@@ -78,12 +78,12 @@ async function runTests() {
   assert(testI18n.isLanguageSelected(), 'Language marked selected after setLanguage');
   assert(testI18n.getLanguage() === 'hi', 'getLanguage() returns hi after selection');
 
-  const formattedHi = testI18n.t('auth.mock_hint', { otp: '1234' });
-  assert(formattedHi.includes('1234'), `Parameter substitution in Hindi formatted correctly: "${formattedHi}"`);
+  const formattedHi = testI18n.t('auth.logged_in_as', { phone: '9800012345' });
+  assert(formattedHi.includes('9800012345'), `Parameter substitution in Hindi formatted correctly: "${formattedHi}"`);
 
   testI18n.setLanguage('en');
-  const formattedEn = testI18n.t('auth.mock_hint', { otp: '1234' });
-  assert(formattedEn.includes('1234'), `Parameter substitution in English formatted correctly: "${formattedEn}"`);
+  const formattedEn = testI18n.t('auth.logged_in_as', { phone: '9800012345' });
+  assert(formattedEn.includes('9800012345'), `Parameter substitution in English formatted correctly: "${formattedEn}"`);
 
   // 3. FASTIFY SERVER INTEGRATION TESTS
   console.log('\n3. Testing Fastify Server Foundation & Health Endpoint...');

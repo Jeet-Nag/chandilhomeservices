@@ -4,6 +4,7 @@ import { db } from '../src/db';
 import { audioService } from '../src/services/audio.service';
 import { validateEnvConfig, DEV_DEFAULT_JWT_SECRET } from '../src/config/env';
 import { ApiResponse, SupportConfig } from '@shared';
+import { checkAuthOptionsRateLimit, resetAuthRateLimits } from '../src/routes/auth.routes';
 
 async function runSecurityLockdownTests() {
   console.log('\n============================================================');
@@ -37,9 +38,6 @@ async function runSecurityLockdownTests() {
   const adminPhone = '9811000005';
 
   await pool.query('DELETE FROM bookings WHERE customer_id IN (SELECT id FROM users WHERE phone IN ($1, $2, $3, $4, $5))', [
-    cust1Phone, cust2Phone, prov1Phone, prov2Phone, adminPhone,
-  ]);
-  await pool.query('DELETE FROM otp_requests WHERE phone IN ($1, $2, $3, $4, $5)', [
     cust1Phone, cust2Phone, prov1Phone, prov2Phone, adminPhone,
   ]);
   await pool.query('DELETE FROM users WHERE phone IN ($1, $2, $3, $4, $5)', [
@@ -418,14 +416,109 @@ async function runSecurityLockdownTests() {
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`
   );
 
+  console.log('\n--- PART 7: Security Vulnerability Remediation Hardening (CHS-SEC-001 - 007) ---');
+
+  // 21. CHS-SEC-001: Standard Defensive Security Headers
+  const pingHeadersRes = await app.inject({
+    method: 'GET',
+    url: '/api/ping',
+  });
+  testAssert(pingHeadersRes.headers['x-content-type-options'] === 'nosniff', '21.1 X-Content-Type-Options: nosniff header present');
+  testAssert(pingHeadersRes.headers['x-frame-options'] === 'DENY', '21.2 X-Frame-Options: DENY header present');
+  testAssert(pingHeadersRes.headers['referrer-policy'] === 'strict-origin-when-cross-origin', '21.3 Referrer-Policy header present');
+  testAssert(pingHeadersRes.headers['permissions-policy'] === 'camera=(), microphone=(self), geolocation=()', '21.4 Permissions-Policy header present');
+  testAssert(pingHeadersRes.headers['cross-origin-opener-policy'] === 'same-origin', '21.5 Cross-Origin-Opener-Policy header present');
+
+  // HSTS in production
+  const prodHstsRes = await prodApp.inject({
+    method: 'GET',
+    url: '/api/ping',
+    headers: { origin: 'https://chandilservices.in' },
+  });
+  testAssert(
+    prodHstsRes.headers['strict-transport-security'] === 'max-age=31536000; includeSubDomains',
+    '21.6 Strict-Transport-Security header present in production mode'
+  );
+
+  // 22. CHS-SEC-002: Production Error Sanitization
+  const errApp = await buildApp({
+    customEnv: {
+      NODE_ENV: 'production',
+      JWT_SECRET: 'a'.repeat(32),
+    },
+  });
+  errApp.get('/test-internal-error', async () => {
+    throw new Error('Secret database connection string: postgres://admin:secret@db/prod');
+  });
+  const prodErrRes = await errApp.inject({
+    method: 'GET',
+    url: '/test-internal-error',
+  });
+  testAssert(prodErrRes.statusCode === 500, '22.1 Internal error returns HTTP 500');
+  const prodErrBody = JSON.parse(prodErrRes.payload);
+  testAssert(
+    prodErrBody.error?.messageEn === 'An unexpected internal error occurred.',
+    '22.2 Internal error message is sanitized in production'
+  );
+  testAssert(
+    !prodErrRes.payload.includes('Secret database connection string'),
+    '22.3 Internal error does not leak sensitive stack or database details'
+  );
+
+  // 23. CHS-SEC-005: Strict audio matching (no loose wildcard leakage)
+  const partialRes = await app.inject({
+    method: 'GET',
+    url: '/api/audio/' + savedWebm.filename.slice(0, 10),
+    headers: { authorization: `Bearer ${tokenAdmin}` },
+  });
+  testAssert(partialRes.statusCode === 404, '23. Partial filename substring query returns 404 and does not match');
+
+  // 24. CHS-SEC-006: IP-based sliding window rate limiting on challenge options
+  resetAuthRateLimits();
+  const testIp = '198.51.100.42';
+  testAssert(checkAuthOptionsRateLimit(testIp, 2, 60000) === true, '24.1 Rate limit allows request 1');
+  testAssert(checkAuthOptionsRateLimit(testIp, 2, 60000) === true, '24.2 Rate limit allows request 2');
+  testAssert(checkAuthOptionsRateLimit(testIp, 2, 60000) === false, '24.3 Rate limit rejects request 3 when limit is 2');
+  resetAuthRateLimits();
+  testAssert(checkAuthOptionsRateLimit(testIp, 2, 60000) === true, '24.4 Resetting rate limits clears throttle window');
+
+  // Fill limit for fake IP to verify route 429 response
+  for (let i = 0; i < 35; i++) {
+    checkAuthOptionsRateLimit('203.0.113.99', 30, 60000);
+  }
+  const rateLimitRes = await app.inject({
+    method: 'POST',
+    url: '/api/auth/passkey/login-options',
+    remoteAddress: '203.0.113.99',
+    payload: {},
+  });
+  testAssert(rateLimitRes.statusCode === 429, '24.5 Endpoint returns 429 when rate limit exceeded');
+  const rateLimitBody = JSON.parse(rateLimitRes.payload);
+  testAssert(rateLimitBody.error?.code === 'RATE_LIMIT_EXCEEDED', '24.6 Rate limit returns RATE_LIMIT_EXCEEDED code');
+
+  // 25. CHS-SEC-007: Role claim synchronization from database in authenticate middleware
+  // Cust1 is initially role 'customer'. Update in DB to 'provider'
+  await pool.query("UPDATE users SET role = 'provider' WHERE id = $1", [cust1Id]);
+  const syncRoleRes = await app.inject({
+    method: 'GET',
+    url: '/api/provider/jobs',
+    headers: { authorization: `Bearer ${tokenCust1}` },
+  });
+  testAssert(syncRoleRes.statusCode === 200, '25.1 Fresh DB role permits access without requiring re-issuance of JWT');
+  // Revert role back to 'customer'
+  await pool.query("UPDATE users SET role = 'customer' WHERE id = $1", [cust1Id]);
+  const revokedRoleRes = await app.inject({
+    method: 'GET',
+    url: '/api/provider/jobs',
+    headers: { authorization: `Bearer ${tokenCust1}` },
+  });
+  testAssert(revokedRoleRes.statusCode === 403, '25.2 Downgraded DB role immediately blocks access with 403');
+
   // Clean up test bookings and users
   await pool.query('DELETE FROM booking_status_logs WHERE changed_by IN (SELECT id FROM users WHERE phone IN ($1, $2, $3, $4, $5))', [
     cust1Phone, cust2Phone, prov1Phone, prov2Phone, adminPhone,
   ]);
   await pool.query('DELETE FROM bookings WHERE customer_id IN (SELECT id FROM users WHERE phone IN ($1, $2, $3, $4, $5))', [
-    cust1Phone, cust2Phone, prov1Phone, prov2Phone, adminPhone,
-  ]);
-  await pool.query('DELETE FROM otp_requests WHERE phone IN ($1, $2, $3, $4, $5)', [
     cust1Phone, cust2Phone, prov1Phone, prov2Phone, adminPhone,
   ]);
   await pool.query('DELETE FROM users WHERE phone IN ($1, $2, $3, $4, $5)', [

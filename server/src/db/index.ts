@@ -1,18 +1,27 @@
 import pg from 'pg';
-import { env } from '../config/env';
+import { env, resolveDatabaseSsl } from '../config/env';
 
 const { Pool } = pg;
+
+export interface DatabaseOptions {
+  connectionString?: string;
+  ssl?: boolean | string;
+}
 
 export class Database {
   private pool: pg.Pool | null = null;
   private isConnected = false;
+  private isSslEnabled = false;
 
-  constructor() {
-    if (env.DATABASE_URL) {
-      const connectionString = env.DATABASE_URL.replace('@localhost:', '@127.0.0.1:').replace('@localhost/', '@127.0.0.1/');
+  constructor(options?: DatabaseOptions) {
+    const rawUrl = options?.connectionString || env.DATABASE_URL;
+    if (rawUrl) {
+      const connectionString = rawUrl.replace('@localhost:', '@127.0.0.1:').replace('@localhost/', '@127.0.0.1/');
+      const sslConfig = resolveDatabaseSsl(options?.ssl);
+      this.isSslEnabled = !!sslConfig;
       this.pool = new Pool({
         connectionString,
-        ssl: env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+        ssl: sslConfig,
         max: 10,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 5000,
@@ -22,6 +31,10 @@ export class Database {
         console.error('[DB] Unexpected error on idle client', err);
       });
     }
+  }
+
+  public isSsl(): boolean {
+    return this.isSslEnabled;
   }
 
   public async checkHealth(): Promise<{ connected: boolean; message: string }> {
@@ -57,6 +70,7 @@ export class Database {
   public async close(): Promise<void> {
     if (this.pool) {
       await this.pool.end();
+      this.pool = null;
       this.isConnected = false;
     }
   }

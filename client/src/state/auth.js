@@ -1,5 +1,8 @@
 import { signal, computed } from '@preact/signals';
+import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { currentLanguage, selectLanguage } from './language';
+export const PasskeyBridge = registerPlugin('PasskeyBridge');
 const TOKEN_KEY = 'chandil_token';
 const USER_KEY = 'chandil_user';
 function getInitialToken() {
@@ -22,97 +25,92 @@ function getInitialUser() {
 export const authToken = signal(getInitialToken());
 export const currentUser = signal(getInitialUser());
 export const isAuthenticated = computed(() => !!authToken.value && !!currentUser.value);
-export const authStep = signal('phone');
+export const authMode = signal('login');
 export const phoneInput = signal('');
-export const otpInput = signal('');
+export const fullNameInput = signal('');
 export const authLoading = signal(false);
 export const authError = signal(null);
-export const mockOtpHint = signal(null);
-export const resendCooldown = signal(0);
-let cooldownTimer = null;
-function startCooldown(seconds) {
-    resendCooldown.value = seconds;
-    if (cooldownTimer)
-        clearInterval(cooldownTimer);
-    cooldownTimer = window.setInterval(() => {
-        if (resendCooldown.value <= 1) {
-            resendCooldown.value = 0;
-            if (cooldownTimer)
-                clearInterval(cooldownTimer);
-        }
-        else {
-            resendCooldown.value -= 1;
-        }
-    }, 1000);
-}
-export async function requestOtp(targetPhone) {
-    const phone = (targetPhone || phoneInput.value).trim();
-    if (!/^[6-9]\d{9}$/.test(phone)) {
-        authError.value = currentLanguage.value === 'hi'
-            ? 'कृपया सही 10 अंकों का मोबाइल नंबर दर्ज करें।'
-            : 'Please enter a valid 10-digit mobile number.';
-        return false;
-    }
+export const authCancelled = signal(false);
+/**
+ * Initiates WebAuthn login ceremony via Passkey.
+ * If phoneHint is provided, it is sent to /api/auth/passkey/login-options as an account lookup hint.
+ * If omitted/empty, discoverable credentials ceremony is initiated.
+ */
+export async function loginWithPasskey(phoneHint) {
     authLoading.value = true;
     authError.value = null;
+    authCancelled.value = false;
+    const phone = (phoneHint !== undefined ? phoneHint : phoneInput.value).trim();
+    const requestBody = {};
+    if (phone && /^[6-9]\d{9}$/.test(phone)) {
+        requestBody.phone = phone;
+    }
     try {
-        const res = await fetch('/api/auth/request-otp', {
+        // 1. Fetch authentication options from backend
+        const optionsRes = await fetch('/api/auth/passkey/login-options', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone }),
+            body: JSON.stringify(requestBody),
         });
-        const body = await res.json();
-        if (!res.ok || !body.success) {
+        const optionsData = await optionsRes.json();
+        if (!optionsRes.ok || !optionsData.success || !optionsData.data) {
             authError.value = currentLanguage.value === 'hi'
-                ? (body.error?.messageHi || 'OTP भेजने में विफल। कृपया पुनः प्रयास करें।')
-                : (body.error?.messageEn || 'Failed to send OTP. Please try again.');
+                ? (optionsData.error?.messageHi || 'लॉगिन विकल्प प्राप्त करने में विफल। कृपया पुनः प्रयास करें।')
+                : (optionsData.error?.messageEn || 'Failed to get login options. Please try again.');
             return false;
         }
-        authStep.value = 'otp';
-        otpInput.value = '';
-        mockOtpHint.value = body.data?.mockOtp || '1234';
-        startCooldown(body.data?.cooldownSeconds || 60);
-        return true;
-    }
-    catch {
-        authError.value = currentLanguage.value === 'hi'
-            ? 'इंटरनेट धीमा है। कृपया कनेक्शन जांचें।'
-            : 'Weak network. Please check your connection.';
-        return false;
-    }
-    finally {
-        authLoading.value = false;
-    }
-}
-export async function verifyOtp() {
-    const phone = phoneInput.value.trim();
-    const otp = otpInput.value.trim();
-    if (otp.length !== 4) {
-        authError.value = currentLanguage.value === 'hi'
-            ? 'कृपया 4 अंकों का OTP डालें।'
-            : 'Please enter the 4-digit OTP.';
-        return false;
-    }
-    authLoading.value = true;
-    authError.value = null;
-    try {
-        const res = await fetch('/api/auth/verify-otp', {
+        // 2. Perform WebAuthn authentication ceremony (native Credential Manager if Android app, otherwise WebAuthn browser API)
+        let authResponse;
+        try {
+            if (Capacitor.isNativePlatform()) {
+                const bridgeResult = await PasskeyBridge.getCredential({
+                    requestJson: JSON.stringify(optionsData.data),
+                });
+                authResponse = JSON.parse(bridgeResult.responseJson);
+            }
+            else {
+                authResponse = await startAuthentication({ optionsJSON: optionsData.data });
+            }
+        }
+        catch (err) {
+            const errCode = err.code || err.message;
+            if (err.name === 'NotAllowedError' || errCode === 'CANCELLATION' || errCode === 'USER_ABORT') {
+                authCancelled.value = true;
+                authError.value = currentLanguage.value === 'hi'
+                    ? 'पासकी सत्यापन रद्द किया गया। पुनः प्रयास करने के लिए नीचे टैप करें।'
+                    : 'Passkey prompt was cancelled. Tap below to retry.';
+            }
+            else if (err.name === 'InvalidStateError' || err.name === 'NotFoundError' || errCode === 'NO_CREDENTIAL') {
+                authError.value = currentLanguage.value === 'hi'
+                    ? 'इस डिवाइस पर कोई पासकी नहीं मिली। कृपया पहले पासकी बनाएं।'
+                    : 'No passkey found on this device. Please create a passkey first.';
+            }
+            else if (err.name === 'NotSupportedError' || errCode === 'UNSUPPORTED') {
+                authError.value = currentLanguage.value === 'hi'
+                    ? 'यह ब्राउज़र या डिवाइस पासकी का समर्थन नहीं करता है।'
+                    : 'Passkeys are not supported on this browser or device.';
+            }
+            else {
+                authError.value = currentLanguage.value === 'hi'
+                    ? (err.message || 'पासकी सत्यापन विफल रहा। कृपया पुनः प्रयास करें।')
+                    : (err.message || 'Passkey authentication failed. Please try again.');
+            }
+            return false;
+        }
+        // 3. Verify assertion with backend
+        const verifyRes = await fetch('/api/auth/passkey/login-verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                phone,
-                otp,
-                preferredLanguage: currentLanguage.value || 'hi',
-            }),
+            body: JSON.stringify({ response: authResponse }),
         });
-        const body = await res.json();
-        if (!res.ok || !body.success || !body.data) {
+        const verifyData = await verifyRes.json();
+        if (!verifyRes.ok || !verifyData.success || !verifyData.data) {
             authError.value = currentLanguage.value === 'hi'
-                ? (body.error?.messageHi || 'गलत OTP है। कृपया पुनः प्रयास करें।')
-                : (body.error?.messageEn || 'Incorrect OTP. Please try again.');
+                ? (verifyData.error?.messageHi || 'पासकी सत्यापन विफल रहा। कृपया पुनः प्रयास करें।')
+                : (verifyData.error?.messageEn || 'Passkey verification failed. Please try again.');
             return false;
         }
-        const { token, user } = body.data;
+        const { token, user } = verifyData.data;
         authToken.value = token;
         currentUser.value = user;
         try {
@@ -125,31 +123,185 @@ export async function verifyOtp() {
         if (user.preferredLanguage && user.preferredLanguage !== currentLanguage.value) {
             selectLanguage(user.preferredLanguage);
         }
-        authStep.value = 'phone';
         phoneInput.value = '';
-        otpInput.value = '';
-        mockOtpHint.value = null;
+        fullNameInput.value = '';
+        authError.value = null;
+        authCancelled.value = false;
         return true;
     }
     catch {
         authError.value = currentLanguage.value === 'hi'
-            ? 'इंटरनेट धीमा है। कृपया कनेक्शन जांचें।'
-            : 'Weak network. Please check your connection.';
+            ? 'नेटवर्क त्रुटि। कृपया इंटरनेट कनेक्शन जांचें।'
+            : 'Network error. Please check your internet connection.';
         return false;
     }
     finally {
         authLoading.value = false;
     }
 }
+/**
+ * Initiates WebAuthn registration ceremony via Passkey.
+ * Collects 10-digit mobile number, optional full name, and preferred language.
+ */
+export async function registerPasskey(customPhone, customName) {
+    const phone = (customPhone !== undefined ? customPhone : phoneInput.value).trim();
+    const fullName = (customName !== undefined ? customName : fullNameInput.value).trim();
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+        authError.value = currentLanguage.value === 'hi'
+            ? 'कृपया सही 10 अंकों का मोबाइल नंबर दर्ज करें।'
+            : 'Please enter a valid 10-digit mobile number.';
+        return false;
+    }
+    authLoading.value = true;
+    authError.value = null;
+    authCancelled.value = false;
+    try {
+        // 1. Fetch creation options from backend
+        const optionsRes = await fetch('/api/auth/passkey/register-options', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                phone,
+                fullName: fullName || undefined,
+                preferredLanguage: currentLanguage.value || 'hi',
+            }),
+        });
+        const optionsData = await optionsRes.json();
+        if (!optionsRes.ok || !optionsData.success || !optionsData.data) {
+            authError.value = currentLanguage.value === 'hi'
+                ? (optionsData.error?.messageHi || 'पंजीकरण विकल्प प्राप्त करने में विफल। कृपया पुनः प्रयास करें।')
+                : (optionsData.error?.messageEn || 'Failed to get registration options. Please try again.');
+            return false;
+        }
+        // 2. Perform WebAuthn registration ceremony (native Credential Manager if Android app, otherwise WebAuthn browser API)
+        let regResponse;
+        try {
+            if (Capacitor.isNativePlatform()) {
+                const bridgeResult = await PasskeyBridge.createCredential({
+                    requestJson: JSON.stringify(optionsData.data),
+                });
+                regResponse = JSON.parse(bridgeResult.responseJson);
+            }
+            else {
+                regResponse = await startRegistration({ optionsJSON: optionsData.data });
+            }
+        }
+        catch (err) {
+            const errCode = err.code || err.message;
+            if (err.name === 'NotAllowedError' || errCode === 'CANCELLATION' || errCode === 'USER_ABORT') {
+                authCancelled.value = true;
+                authError.value = currentLanguage.value === 'hi'
+                    ? 'पासकी निर्माण रद्द किया गया। पुनः प्रयास करने के लिए नीचे टैप करें।'
+                    : 'Passkey creation was cancelled. Tap below to retry.';
+            }
+            else if (err.name === 'InvalidStateError') {
+                authError.value = currentLanguage.value === 'hi'
+                    ? 'इस डिवाइस पर पहले से पासकी मौजूद है। कृपया लॉगिन करें।'
+                    : 'A passkey already exists on this device. Please sign in.';
+            }
+            else if (err.name === 'NotSupportedError' || errCode === 'UNSUPPORTED') {
+                authError.value = currentLanguage.value === 'hi'
+                    ? 'यह ब्राउज़र या डिवाइस पासकी का समर्थन नहीं करता है।'
+                    : 'Passkeys are not supported on this browser or device.';
+            }
+            else {
+                authError.value = currentLanguage.value === 'hi'
+                    ? (err.message || 'पासकी निर्माण विफल रहा। कृपया पुनः प्रयास करें।')
+                    : (err.message || 'Passkey creation failed. Please try again.');
+            }
+            return false;
+        }
+        // 3. Verify attestation with backend
+        const verifyRes = await fetch('/api/auth/passkey/register-verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                phone,
+                response: regResponse,
+                fullName: fullName || undefined,
+                preferredLanguage: currentLanguage.value || 'hi',
+            }),
+        });
+        const verifyData = await verifyRes.json();
+        if (!verifyRes.ok || !verifyData.success || !verifyData.data) {
+            authError.value = currentLanguage.value === 'hi'
+                ? (verifyData.error?.messageHi || 'पासकी पंजीकरण सत्यापन विफल रहा। कृपया पुनः प्रयास करें।')
+                : (verifyData.error?.messageEn || 'Passkey registration verification failed. Please try again.');
+            return false;
+        }
+        const { token, user } = verifyData.data;
+        authToken.value = token;
+        currentUser.value = user;
+        try {
+            localStorage.setItem(TOKEN_KEY, token);
+            localStorage.setItem(USER_KEY, JSON.stringify(user));
+        }
+        catch {
+            // Ignore localStorage quotas
+        }
+        if (user.preferredLanguage && user.preferredLanguage !== currentLanguage.value) {
+            selectLanguage(user.preferredLanguage);
+        }
+        phoneInput.value = '';
+        fullNameInput.value = '';
+        authError.value = null;
+        authCancelled.value = false;
+        authMode.value = 'login';
+        return true;
+    }
+    catch {
+        authError.value = currentLanguage.value === 'hi'
+            ? 'नेटवर्क त्रुटि। कृपया इंटरनेट कनेक्शन जांचें।'
+            : 'Network error. Please check your internet connection.';
+        return false;
+    }
+    finally {
+        authLoading.value = false;
+    }
+}
+/**
+ * Validates active session against /api/auth/me to verify tokenVersion.
+ */
+export async function refreshSession() {
+    const token = authToken.value;
+    if (!token)
+        return false;
+    try {
+        const res = await fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        const body = await res.json();
+        if (res.ok && body.success && body.data) {
+            currentUser.value = body.data.user;
+            try {
+                localStorage.setItem(USER_KEY, JSON.stringify(body.data.user));
+            }
+            catch {
+                // Ignore
+            }
+            return true;
+        }
+        else {
+            handleSessionExpired();
+            return false;
+        }
+    }
+    catch {
+        return !!currentUser.value;
+    }
+}
+/**
+ * Clears local credentials and notifies backend to invalidate token version.
+ */
 export async function logout() {
     const token = authToken.value;
     authToken.value = null;
     currentUser.value = null;
-    authStep.value = 'phone';
+    authMode.value = 'login';
     phoneInput.value = '';
-    otpInput.value = '';
-    mockOtpHint.value = null;
+    fullNameInput.value = '';
     authError.value = null;
+    authCancelled.value = false;
     try {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
@@ -172,6 +324,9 @@ export async function logout() {
         }
     }
 }
+/**
+ * Handles server-side 401 Unauthorized or expired tokenVersion.
+ */
 export function handleSessionExpired() {
     authToken.value = null;
     currentUser.value = null;
@@ -182,7 +337,7 @@ export function handleSessionExpired() {
     catch {
         // Ignore localStorage errors
     }
-    authStep.value = 'phone';
+    authMode.value = 'login';
     authError.value = currentLanguage.value === 'hi'
         ? 'सत्र समाप्त हो गया है। कृपया पुनः लॉगिन करें।'
         : 'Session expired. Please log in again.';

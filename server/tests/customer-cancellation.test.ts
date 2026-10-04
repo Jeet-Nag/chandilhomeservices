@@ -1,6 +1,7 @@
 import { buildApp } from '../src/app';
 import { db } from '../src/db';
 import { ApiResponse, Booking, BookingDetail, BookingStatus, canTransition } from '@shared';
+import { createTestCustomer, createTestProvider, createTestAdmin } from './helpers/auth-helper';
 
 let passed = 0;
 let failed = 0;
@@ -32,7 +33,6 @@ async function runCustomerCancellationTests() {
   const c2Phone = '9800099002';
   const pPhone = '9800099003';
   const adminPhone = '9800099004';
-  const testOtp = process.env.DEV_MOCK_OTP || '1234';
 
   async function cleanupFixtures() {
     await pool!.query(
@@ -49,10 +49,6 @@ async function runCustomerCancellationTests() {
       [pPhone]
     );
     await pool!.query(
-      `DELETE FROM otp_requests WHERE phone IN ($1, $2, $3, $4)`,
-      [c1Phone, c2Phone, pPhone, adminPhone]
-    );
-    await pool!.query(
       `DELETE FROM users WHERE phone IN ($1, $2, $3, $4)`,
       [c1Phone, c2Phone, pPhone, adminPhone]
     );
@@ -61,21 +57,22 @@ async function runCustomerCancellationTests() {
   try {
     await cleanupFixtures();
 
-    // 1. Seed users
-    const { rows: userRows } = await pool.query<{ id: string; phone: string; role: string }>(
-      `INSERT INTO users (phone, role, preferred_language, full_name, is_active)
-       VALUES ($1, 'customer', 'en', 'Customer One', true),
-              ($2, 'customer', 'hi', 'Customer Two', true),
-              ($3, 'provider', 'hi', 'Provider Ramesh', true),
-              ($4, 'admin', 'en', 'Admin Staff', true)
-       RETURNING id, phone, role`,
-      [c1Phone, c2Phone, pPhone, adminPhone]
-    );
+    // 1. Seed users & obtain tokens via central auth helper
+    const authC1 = await createTestCustomer(app, c1Phone, 'Customer One');
+    const c1Id = authC1.id;
+    const c1Token = authC1.token;
 
-    const c1Id = userRows.find((u) => u.phone === c1Phone)!.id;
-    const c2Id = userRows.find((u) => u.phone === c2Phone)!.id;
-    const pId = userRows.find((u) => u.phone === pPhone)!.id;
-    const adminId = userRows.find((u) => u.phone === adminPhone)!.id;
+    const authC2 = await createTestCustomer(app, c2Phone, 'Customer Two');
+    const c2Id = authC2.id;
+    const c2Token = authC2.token;
+
+    const authP = await createTestProvider(app, pPhone, 'Provider Ramesh');
+    const pId = authP.id;
+    const pToken = authP.token;
+
+    const authAdmin = await createTestAdmin(app, adminPhone, 'Admin Staff');
+    const adminId = authAdmin.id;
+    const adminToken = authAdmin.token;
 
     // Seed provider profile for electrician
     await pool.query(
@@ -83,23 +80,6 @@ async function runCustomerCancellationTests() {
        VALUES ($1, 'electrician', 'Chandil Bazar', true)`,
       [pId]
     );
-
-    // Authenticate users
-    await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: c1Phone } });
-    const authC1Res = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: c1Phone, otp: testOtp } });
-    const c1Token = JSON.parse(authC1Res.payload).data.token;
-
-    await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: c2Phone } });
-    const authC2Res = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: c2Phone, otp: testOtp } });
-    const c2Token = JSON.parse(authC2Res.payload).data.token;
-
-    await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: pPhone } });
-    const authPRes = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: pPhone, otp: testOtp } });
-    const pToken = JSON.parse(authPRes.payload).data.token;
-
-    await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: adminPhone } });
-    const authAdminRes = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: adminPhone, otp: testOtp } });
-    const adminToken = JSON.parse(authAdminRes.payload).data.token;
 
     // Helper: Seed a booking directly
     async function seedBooking(opts: {

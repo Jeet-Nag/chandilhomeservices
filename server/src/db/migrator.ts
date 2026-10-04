@@ -2,28 +2,42 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
-import { env } from '../config/env';
+import { env, resolveDatabaseSsl } from '../config/env';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export interface MigratorOptions {
+  connectionString?: string;
+  ssl?: boolean | string;
+}
+
 export class Migrator {
   private pool: pg.Pool;
+  private isSslEnabled = false;
 
-  constructor(pool?: pg.Pool) {
-    if (pool) {
-      this.pool = pool;
+  constructor(poolOrOptions?: pg.Pool | MigratorOptions) {
+    if (poolOrOptions && 'query' in poolOrOptions) {
+      this.pool = poolOrOptions;
     } else {
-      if (!env.DATABASE_URL) {
+      const opts = poolOrOptions as MigratorOptions | undefined;
+      const rawUrl = opts?.connectionString || env.DATABASE_URL;
+      if (!rawUrl) {
         throw new Error('DATABASE_URL is not set in environment.');
       }
-      const connectionString = env.DATABASE_URL.replace('@localhost:', '@127.0.0.1:').replace('@localhost/', '@127.0.0.1/');
+      const connectionString = rawUrl.replace('@localhost:', '@127.0.0.1:').replace('@localhost/', '@127.0.0.1/');
+      const sslConfig = resolveDatabaseSsl(opts?.ssl);
+      this.isSslEnabled = !!sslConfig;
       this.pool = new pg.Pool({
         connectionString,
-        ssl: env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+        ssl: sslConfig,
         connectionTimeoutMillis: 5000,
       });
     }
+  }
+
+  public isSsl(): boolean {
+    return this.isSslEnabled;
   }
 
   public async runMigrations(migrationsDir?: string): Promise<{ applied: string[]; skipped: string[] }> {

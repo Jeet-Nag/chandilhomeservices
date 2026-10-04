@@ -34,7 +34,6 @@ async function runAdminProviderTests() {
   const newProviderPhone = '9800055004';
   const deactProviderPhone = '9800055005';
   const conflictProviderPhone = '9800055006';
-  const testOtp = env.DEV_MOCK_OTP || '1234';
 
   const allTestPhones = [
     adminPhone,
@@ -56,9 +55,6 @@ async function runAdminProviderTests() {
     await pool!.query(
       `DELETE FROM bookings WHERE idempotency_key LIKE 'adm-prov-%'`
     );
-
-    // 2. Clean OTPs
-    await pool!.query('DELETE FROM otp_requests WHERE phone = ANY($1)', [allTestPhones]);
 
     // 3. Clean provider profiles and users
     await pool!.query(
@@ -429,22 +425,20 @@ async function runAdminProviderTests() {
     });
     assert(tamperRes.statusCode === 400, 'Client attempt to supply role/isActive/tokenVersion rejected with 400 (strict validation)');
 
-    // D.8 Newly provisioned provider can log in via OTP
-    const provReqOtp = await app.inject({
+    // D.8 Newly provisioned provider has role=provider and can request passkey registration
+    const provRegOptions = await app.inject({
       method: 'POST',
-      url: '/api/auth/request-otp',
+      url: '/api/auth/passkey/register-options',
       payload: { phone: newProviderPhone },
     });
-    assert(provReqOtp.statusCode === 200, 'Provisioned provider requests OTP successfully');
-    const provVerifyOtp = await app.inject({
-      method: 'POST',
-      url: '/api/auth/verify-otp',
-      payload: { phone: newProviderPhone, otp: testOtp },
-    });
-    assert(provVerifyOtp.statusCode === 200, 'Provisioned provider verifies OTP successfully');
-    const provAuthBody = JSON.parse(provVerifyOtp.payload);
-    assert(provAuthBody.data.user.role === 'provider', 'Logged in account role is strictly "provider"');
-    const newProvToken = provAuthBody.data.token;
+    assert(provRegOptions.statusCode === 200, 'Provisioned provider requests passkey options successfully');
+    const { rows: provUserRows } = await pool.query('SELECT id, role, token_version FROM users WHERE phone = $1', [newProviderPhone]);
+    assert(provUserRows.length === 1, 'Provider user exists in DB');
+    assert(provUserRows[0].role === 'provider', 'Provisioned provider role is strictly "provider"');
+    const newProvToken = app.jwt.sign(
+      { id: provUserRows[0].id, phone: newProviderPhone, role: 'provider', tokenVersion: provUserRows[0].token_version },
+      { expiresIn: '30d' }
+    );
 
     // Verify provider can access provider feed
     const feedRes = await app.inject({
@@ -536,14 +530,11 @@ async function runAdminProviderTests() {
     });
     const deactProvId = JSON.parse(deactCreate.payload).data.provider.id;
 
-    // Login as deact provider to obtain active token
-    await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: deactProviderPhone } });
-    const deactLogin = await app.inject({
-      method: 'POST',
-      url: '/api/auth/verify-otp',
-      payload: { phone: deactProviderPhone, otp: testOtp },
-    });
-    const deactToken = JSON.parse(deactLogin.payload).data.token;
+    // Obtain active token for deact provider
+    const deactToken = app.jwt.sign(
+      { id: deactProvId, phone: deactProviderPhone, role: 'provider', tokenVersion: 1 },
+      { expiresIn: '30d' }
+    );
 
     // Verify active token works
     const feedBeforeDeact = await app.inject({
@@ -579,14 +570,12 @@ async function runAdminProviderTests() {
     assert(feedAfterDeact.statusCode === 401, 'Existing provider JWT rejected with 401 after deactivation');
 
     // F.4 Deactivated provider cannot log in (ACCOUNT_DEACTIVATED)
-    await pool.query('DELETE FROM otp_requests WHERE phone = $1', [deactProviderPhone]);
-    await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: deactProviderPhone } });
     const deactLoginAttempt = await app.inject({
       method: 'POST',
-      url: '/api/auth/verify-otp',
-      payload: { phone: deactProviderPhone, otp: testOtp },
+      url: '/api/auth/passkey/register-options',
+      payload: { phone: deactProviderPhone },
     });
-    assert(deactLoginAttempt.statusCode === 400, 'Deactivated provider login rejected with 400 Bad Request');
+    assert(deactLoginAttempt.statusCode === 403, 'Deactivated provider passkey register rejected with 403 Forbidden');
     assert(JSON.parse(deactLoginAttempt.payload).error.code === 'ACCOUNT_DEACTIVATED', 'Error code is ACCOUNT_DEACTIVATED');
 
     // F.5 Repeated deactivation is idempotent (does NOT increment token_version again)
@@ -665,15 +654,13 @@ async function runAdminProviderTests() {
     const { rows: reactUserRows } = await pool.query('SELECT token_version FROM users WHERE id = $1', [deactProvId]);
     assert(reactUserRows[0].token_version === 2, 'token_version NOT incremented on reactivation');
 
-    // Reactivated provider can log in again
-    await pool.query('DELETE FROM otp_requests WHERE phone = $1', [deactProviderPhone]);
-    await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: deactProviderPhone } });
+    // Reactivated provider can request passkey options again
     const reactLogin = await app.inject({
       method: 'POST',
-      url: '/api/auth/verify-otp',
-      payload: { phone: deactProviderPhone, otp: testOtp },
+      url: '/api/auth/passkey/register-options',
+      payload: { phone: deactProviderPhone },
     });
-    assert(reactLogin.statusCode === 200, 'Reactivated provider logs in successfully (200 OK)');
+    assert(reactLogin.statusCode === 200, 'Reactivated provider requests passkey options successfully (200 OK)');
 
     // Repeated activation is idempotent
     const repeatActiveRes = await app.inject({

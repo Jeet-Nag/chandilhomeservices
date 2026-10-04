@@ -4,6 +4,7 @@ import { buildApp } from '../src/app';
 import { db } from '../src/db';
 import { audioService } from '../src/services/audio.service';
 import { ApiResponse, Booking, en, hi, CHANDIL_LOCALITIES } from '@shared';
+import { createTestCustomer, createTestProvider } from './helpers/auth-helper';
 
 let passed = 0;
 let failed = 0;
@@ -47,7 +48,6 @@ async function runBookingTests() {
   const customerAPhone = '9876543501';
   const customerBPhone = '9876543502';
   const providerPhone = '9876543503';
-  const testOtp = process.env.DEV_MOCK_OTP || '1234';
 
   // Clean up fixtures from previous runs
   await pool.query('DELETE FROM booking_status_logs WHERE changed_by IN (SELECT id FROM users WHERE phone IN ($1, $2, $3))', [
@@ -60,41 +60,22 @@ async function runBookingTests() {
     customerBPhone,
     providerPhone,
   ]);
-  await pool.query('DELETE FROM otp_requests WHERE phone IN ($1, $2, $3)', [
-    customerAPhone,
-    customerBPhone,
-    providerPhone,
-  ]);
   await pool.query('DELETE FROM users WHERE phone IN ($1, $2, $3)', [
     customerAPhone,
     customerBPhone,
     providerPhone,
   ]);
 
-  // Pre-seed users
-  await pool.query(
-    `INSERT INTO users (phone, role, preferred_language, full_name)
-     VALUES ($1, 'customer', 'en', 'Customer One'),
-            ($2, 'customer', 'hi', 'Customer Two'),
-            ($3, 'provider', 'hi', 'Provider Mistri')`,
-    [customerAPhone, customerBPhone, providerPhone]
-  );
+  // Obtain tokens via central auth helper
+  const authA = await createTestCustomer(app, customerAPhone, 'Customer One');
+  const tokenA = authA.token;
+  const userAId = authA.id;
 
-  // Authenticate Customer A
-  await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: customerAPhone } });
-  const authARes = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: customerAPhone, otp: testOtp } });
-  const tokenA = JSON.parse(authARes.payload).data.token;
-  const userAId = JSON.parse(authARes.payload).data.user.id;
+  const authB = await createTestCustomer(app, customerBPhone, 'Customer Two');
+  const tokenB = authB.token;
 
-  // Authenticate Customer B
-  await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: customerBPhone } });
-  const authBRes = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: customerBPhone, otp: testOtp } });
-  const tokenB = JSON.parse(authBRes.payload).data.token;
-
-  // Authenticate Provider
-  await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: providerPhone } });
-  const authPRes = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: providerPhone, otp: testOtp } });
-  const tokenP = JSON.parse(authPRes.payload).data.token;
+  const authP = await createTestProvider(app, providerPhone, 'Provider Mistri');
+  const tokenP = authP.token;
 
   console.log('--- 1. Audio Storage & Physical Size Measurements ---');
 
@@ -616,11 +597,6 @@ async function runBookingTests() {
     providerPhone,
   ]);
   await pool.query('DELETE FROM bookings WHERE customer_id IN (SELECT id FROM users WHERE phone IN ($1, $2, $3))', [
-    customerAPhone,
-    customerBPhone,
-    providerPhone,
-  ]);
-  await pool.query('DELETE FROM otp_requests WHERE phone IN ($1, $2, $3)', [
     customerAPhone,
     customerBPhone,
     providerPhone,

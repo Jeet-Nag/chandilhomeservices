@@ -46,11 +46,6 @@ async function runProviderFeedTests() {
     providerPhone,
     adminPhone,
   ]);
-  await pool.query('DELETE FROM otp_requests WHERE phone IN ($1, $2, $3)', [
-    customerPhone,
-    providerPhone,
-    adminPhone,
-  ]);
   await pool.query('DELETE FROM users WHERE phone IN ($1, $2, $3)', [
     customerPhone,
     providerPhone,

@@ -56,7 +56,7 @@ export const audioRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       const bookingQuery = `
         SELECT id, customer_id, provider_id, status
         FROM bookings
-        WHERE audio_url = $1 OR audio_url = $2 OR audio_url LIKE '%' || $3
+        WHERE audio_url = $1 OR audio_url = $2
         LIMIT 1
       `;
       const { rows: bookings } = await pool.query<{
@@ -64,7 +64,7 @@ export const audioRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         customer_id: string;
         provider_id: string | null;
         status: string;
-      }>(bookingQuery, [`/api/audio/${filename}`, filename, filename]);
+      }>(bookingQuery, [`/api/audio/${filename}`, filename]);
 
       if (bookings.length === 0) {
         const response: ApiResponse = {

@@ -46,8 +46,6 @@ async function runAdminBookingTests() {
       `DELETE FROM bookings WHERE idempotency_key LIKE 'adm-bk-%'`
     );
 
-    // 2. Clean OTPs
-    await pool!.query('DELETE FROM otp_requests WHERE phone = ANY($1)', [allTestPhones]);
 
     // 3. Clean provider profiles and users
     await pool!.query(

@@ -1,6 +1,7 @@
 import { buildApp } from '../src/app';
 import { db } from '../src/db';
 import { ApiResponse, Booking, BookingDetail, BookingStatus, en, hi } from '@shared';
+import { createTestCustomer, createTestProvider } from './helpers/auth-helper';
 
 let passed = 0;
 let failed = 0;
@@ -31,8 +32,6 @@ async function runBookingStatusTests() {
   const customer2Phone = '9876543602';
   const customerEmptyPhone = '9876543603';
   const providerPhone = '9876543604';
-  const testOtp = process.env.DEV_MOCK_OTP || '1234';
-
   // 1. Cleanup old test fixtures
   await pool.query(
     'DELETE FROM booking_status_logs WHERE changed_by IN (SELECT id FROM users WHERE phone IN ($1, $2, $3, $4))',
@@ -43,49 +42,26 @@ async function runBookingStatusTests() {
     [customer1Phone, customer2Phone, customerEmptyPhone, providerPhone]
   );
   await pool.query(
-    'DELETE FROM otp_requests WHERE phone IN ($1, $2, $3, $4)',
-    [customer1Phone, customer2Phone, customerEmptyPhone, providerPhone]
-  );
-  await pool.query(
     'DELETE FROM users WHERE phone IN ($1, $2, $3, $4)',
     [customer1Phone, customer2Phone, customerEmptyPhone, providerPhone]
   );
 
-  // 2. Pre-seed users
-  const { rows: users } = await pool.query(
-    `INSERT INTO users (phone, role, preferred_language, full_name)
-     VALUES ($1, 'customer', 'en', 'Customer One'),
-            ($2, 'customer', 'hi', 'Customer Two'),
-            ($3, 'customer', 'hi', 'Customer Zero'),
-            ($4, 'provider', 'hi', 'Technician Ramesh')
-     RETURNING id, phone, role`,
-    [customer1Phone, customer2Phone, customerEmptyPhone, providerPhone]
-  );
+  // 2. Pre-seed users and obtain tokens via central auth helper
+  const auth1 = await createTestCustomer(app, customer1Phone, 'Customer One');
+  const c1Id = auth1.id;
+  const token1 = auth1.token;
 
-  const c1Id = users.find((u) => u.phone === customer1Phone)!.id;
-  const c2Id = users.find((u) => u.phone === customer2Phone)!.id;
-  const cEmptyId = users.find((u) => u.phone === customerEmptyPhone)!.id;
-  const provId = users.find((u) => u.phone === providerPhone)!.id;
+  const auth2 = await createTestCustomer(app, customer2Phone, 'Customer Two');
+  const c2Id = auth2.id;
+  const token2 = auth2.token;
 
-  // Authenticate Customer 1
-  await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: customer1Phone } });
-  const auth1Res = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: customer1Phone, otp: testOtp } });
-  const token1 = JSON.parse(auth1Res.payload).data.token;
+  const authEmpty = await createTestCustomer(app, customerEmptyPhone, 'Customer Zero');
+  const cEmptyId = authEmpty.id;
+  const tokenEmpty = authEmpty.token;
 
-  // Authenticate Customer 2
-  await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: customer2Phone } });
-  const auth2Res = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: customer2Phone, otp: testOtp } });
-  const token2 = JSON.parse(auth2Res.payload).data.token;
-
-  // Authenticate Customer with Zero Bookings
-  await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: customerEmptyPhone } });
-  const authEmptyRes = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: customerEmptyPhone, otp: testOtp } });
-  const tokenEmpty = JSON.parse(authEmptyRes.payload).data.token;
-
-  // Authenticate Provider
-  await app.inject({ method: 'POST', url: '/api/auth/request-otp', payload: { phone: providerPhone } });
-  const authPRes = await app.inject({ method: 'POST', url: '/api/auth/verify-otp', payload: { phone: providerPhone, otp: testOtp } });
-  const tokenP = JSON.parse(authPRes.payload).data.token;
+  const authP = await createTestProvider(app, providerPhone, 'Technician Ramesh');
+  const provId = authP.id;
+  const tokenP = authP.token;
 
   console.log('--- 1. Seed Multiple Real Bookings with Timestamps & Status Logs ---');
 
@@ -409,10 +385,6 @@ async function runBookingStatusTests() {
   );
   await pool.query(
     'DELETE FROM bookings WHERE customer_id IN (SELECT id FROM users WHERE phone IN ($1, $2, $3, $4))',
-    [customer1Phone, customer2Phone, customerEmptyPhone, providerPhone]
-  );
-  await pool.query(
-    'DELETE FROM otp_requests WHERE phone IN ($1, $2, $3, $4)',
     [customer1Phone, customer2Phone, customerEmptyPhone, providerPhone]
   );
   await pool.query(

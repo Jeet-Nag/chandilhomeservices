@@ -26,3 +26,14 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Keystores and private keys
+*.jks
+*.keystore
+*.pem
+*.key
+
+# Android local machine configuration
+android/local.properties
+.gradle/
+

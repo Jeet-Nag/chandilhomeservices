@@ -59,7 +59,11 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       return reply.status(401).send(response);
     }
 
-    request.user = decoded;
+    request.user = {
+      ...decoded,
+      role: activeUser.role,
+      phone: activeUser.phone,
+    };
     request.userProfile = activeUser;
   } catch (err: any) {
     const response: ApiResponse = {

@@ -11,8 +11,6 @@ export interface ApiResponse<T = unknown> {
 
 export type ApiErrorCode =
   | 'INVALID_PHONE'
-  | 'INVALID_OTP'
-  | 'OTP_EXPIRED'
   | 'RATE_LIMIT_EXCEEDED'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'

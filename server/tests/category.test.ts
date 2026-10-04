@@ -1,6 +1,7 @@
 import { buildApp } from '../src/app';
 import { db } from '../src/db';
 import { ApiResponse, ServiceCategory } from '@shared';
+import { createTestCustomer, createTestProvider } from './helpers/auth-helper';
 
 let passed = 0;
 let failed = 0;
@@ -29,46 +30,15 @@ async function runCategoryTests() {
 
   const customerPhone = '9876543291';
   const providerPhone = '9876543292';
-  const testOtp = process.env.DEV_MOCK_OTP || '1234';
 
   // Clean up fixtures
-  await pool.query('DELETE FROM otp_requests WHERE phone IN ($1, $2)', [customerPhone, providerPhone]);
   await pool.query('DELETE FROM users WHERE phone IN ($1, $2)', [customerPhone, providerPhone]);
 
-  // Pre-seed provider
-  await pool.query(
-    `INSERT INTO users (phone, role, preferred_language, full_name)
-     VALUES ($1, 'provider', 'hi', 'Provider Test')`,
-    [providerPhone]
-  );
-
-  // Obtain customer token
-  await app.inject({
-    method: 'POST',
-    url: '/api/auth/request-otp',
-    payload: { phone: customerPhone },
-  });
-  const custVerifyRes = await app.inject({
-    method: 'POST',
-    url: '/api/auth/verify-otp',
-    payload: { phone: customerPhone, otp: testOtp },
-  });
-  const custBody = JSON.parse(custVerifyRes.payload);
-  const customerToken = custBody.data?.token;
-
-  // Obtain provider token
-  await app.inject({
-    method: 'POST',
-    url: '/api/auth/request-otp',
-    payload: { phone: providerPhone },
-  });
-  const provVerifyRes = await app.inject({
-    method: 'POST',
-    url: '/api/auth/verify-otp',
-    payload: { phone: providerPhone, otp: testOtp },
-  });
-  const provBody = JSON.parse(provVerifyRes.payload);
-  const providerToken = provBody.data?.token;
+  // Obtain test tokens via central auth helper
+  const custAuth = await createTestCustomer(app, customerPhone, 'Customer Test');
+  const provAuth = await createTestProvider(app, providerPhone, 'Provider Test');
+  const customerToken = custAuth.token;
+  const providerToken = provAuth.token;
 
   console.log('--- 1. Authentication & Authorization Guards ---');
 
@@ -256,7 +226,6 @@ async function runCategoryTests() {
   assert(noMixedHindi, 'Zero parenthetical English translations in Hindi dictionary');
 
   // Clean up fixtures
-  await pool.query('DELETE FROM otp_requests WHERE phone IN ($1, $2)', [customerPhone, providerPhone]);
   await pool.query('DELETE FROM users WHERE phone IN ($1, $2)', [customerPhone, providerPhone]);
 
   console.log('\n============================================================');

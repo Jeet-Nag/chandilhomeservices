@@ -3,6 +3,7 @@ import { db } from '../src/db';
 import { env } from '../src/config/env';
 import { en } from '../../shared/i18n/en';
 import { hi } from '../../shared/i18n/hi';
+import { createTestAdmin, createTestCustomer } from './helpers/auth-helper';
 
 let passed = 0;
 let failed = 0;
@@ -34,7 +35,6 @@ async function runAdminFoundationTests() {
   const testProviderPhone = '9800066002';
   const testAdminPhone = '9800066003';
   const testStrangerPhone = '9800066099';
-  const testOtp = env.DEV_MOCK_OTP || '1234';
 
   const allTestPhones = [
     testCustomerPhone,
@@ -44,7 +44,6 @@ async function runAdminFoundationTests() {
   ];
 
   async function cleanupFixtures() {
-    await pool!.query('DELETE FROM otp_requests WHERE phone = ANY($1)', [allTestPhones]);
     await pool!.query('DELETE FROM users WHERE phone = ANY($1)', [allTestPhones]);
   }
 
@@ -74,46 +73,18 @@ async function runAdminFoundationTests() {
     );
     const adminId = adminRows[0].id;
 
-    console.log('--- 1. Admin Authentication via Approved OTP/JWT Mechanism ---');
+    console.log('--- 1. Admin Authentication & Role Boundary ---');
 
-    // 1.1 Request OTP for admin phone
-    const reqOtpRes = await app.inject({
-      method: 'POST',
-      url: '/api/auth/request-otp',
-      payload: { phone: testAdminPhone },
-    });
-    assert(reqOtpRes.statusCode === 200, 'Admin can request OTP (200 OK)');
+    // 1.1 Obtain admin token via central auth helper
+    const adminAuth = await createTestAdmin(app, testAdminPhone, 'Chandil Master Admin');
+    assert(adminAuth.user.role === 'admin', 'Authenticated user role is strictly "admin"');
+    assert(adminAuth.user.id === adminId, 'Authenticated user ID matches seeded admin');
+    assert(typeof adminAuth.token === 'string' && adminAuth.token.length > 20, 'Valid admin JWT returned');
+    const adminToken = adminAuth.token;
 
-    // 1.2 Verify OTP for existing admin user
-    const verifyOtpRes = await app.inject({
-      method: 'POST',
-      url: '/api/auth/verify-otp',
-      payload: { phone: testAdminPhone, otp: testOtp, preferredLanguage: 'en' },
-    });
-    assert(verifyOtpRes.statusCode === 200, 'Admin OTP verification succeeds (200 OK)');
-    const verifyOtpBody = JSON.parse(verifyOtpRes.payload);
-    assert(verifyOtpBody.success === true, 'Admin login response has success: true');
-    assert(verifyOtpBody.data.user.role === 'admin', 'Authenticated user role is strictly "admin"');
-    assert(verifyOtpBody.data.user.id === adminId, 'Authenticated user ID matches seeded admin');
-    assert(verifyOtpBody.data.isNewUser === false, 'Existing admin flagged as isNewUser: false');
-    assert(typeof verifyOtpBody.data.token === 'string' && verifyOtpBody.data.token.length > 20, 'Valid admin JWT returned');
-    const adminToken = verifyOtpBody.data.token;
-
-    // 1.3 Security: Arbitrary public phone cannot register as admin
-    const strangerReqOtp = await app.inject({
-      method: 'POST',
-      url: '/api/auth/request-otp',
-      payload: { phone: testStrangerPhone },
-    });
-    assert(strangerReqOtp.statusCode === 200, 'Stranger can request OTP');
-    const strangerVerify = await app.inject({
-      method: 'POST',
-      url: '/api/auth/verify-otp',
-      payload: { phone: testStrangerPhone, otp: testOtp },
-    });
-    assert(strangerVerify.statusCode === 200, 'Stranger verifies OTP');
-    const strangerBody = JSON.parse(strangerVerify.payload);
-    assert(strangerBody.data.user.role === 'customer', 'New self-service registration is strictly customer (cannot self-register admin)');
+    // 1.2 Security: Public registration defaults strictly to customer role (cannot self-register admin)
+    const strangerAuth = await createTestCustomer(app, testStrangerPhone, 'Stranger');
+    assert(strangerAuth.user.role === 'customer', 'New self-service registration is strictly customer (cannot self-register admin)');
 
     console.log('\n--- 2. Server-Side Admin RBAC Boundaries (GET /api/admin/me) ---');
 
