@@ -1,0 +1,53 @@
+# Dependency directories (installed fresh inside Docker)
+node_modules
+*/node_modules
+
+# Git repository
+.git
+.gitignore
+
+# Environment configurations and secret files
+.env
+.env.*
+*.env
+*.local
+
+# Build outputs and caches
+dist
+*/dist
+.cache
+.vite
+
+# Android project, Gradle, and mobile build outputs
+android/
+.gradle/
+*.apk
+*.aab
+*.dex
+local.properties
+
+# Cryptographic keys, keystores, and certificates
+*.jks
+*.keystore
+*.pem
+*.key
+*.crt
+
+# Editor, IDE, and operating system metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and runtime artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local uploads and test recordings
+uploads/
+*/uploads/
