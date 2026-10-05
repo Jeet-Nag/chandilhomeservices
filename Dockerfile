@@ -63,6 +63,7 @@ COPY --from=prod-deps --chown=node:node /app/package.json ./package.json
 COPY --from=builder --chown=node:node /app/server/package.json ./server/package.json
 COPY --from=builder --chown=node:node /app/server/dist ./server/dist
 COPY --from=builder --chown=node:node /app/server/src/db/migrations ./server/dist/server/src/db/migrations
+COPY --from=builder --chown=node:node /app/server/src/db/seeds ./server/dist/server/src/db/seeds
 COPY --from=builder --chown=node:node /app/client/dist ./client/dist
 
 # Switch to non-root node user for security
@@ -74,5 +75,6 @@ VOLUME ["/app/uploads"]
 # Expose default HTTP port
 EXPOSE 3000
 
-# Launch Fastify production server
-CMD ["node", "server/dist/index.js"]
+# Run database migrations and seeds via existing Migrator, then launch Fastify production server
+CMD ["sh", "-c", "node --input-type=module -e \"import { Migrator } from './server/dist/server/src/db/migrator.js'; let migrator; try { migrator = new Migrator(); const res = await migrator.runMigrations(); console.log('[Migrator] Applied ' + res.applied.length + ' migrations, skipped ' + res.skipped.length + ' existing.'); const seeds = await migrator.runSeeds(); console.log('[Migrator] Executed ' + seeds.length + ' seed files.'); await migrator.close(); } catch (err) { console.error('[Migrator] Fatal migration error:', err); if (migrator) await migrator.close().catch(() => {}); process.exit(1); }\" && exec node server/dist/index.js"]
+
