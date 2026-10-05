@@ -94,7 +94,7 @@ export class PasskeyService {
       attestationType: 'none',
       authenticatorSelection: {
         residentKey: 'preferred',
-        userVerification: 'preferred',
+        userVerification: 'required',
       },
       excludeCredentials: existingCredentials.map((c) => ({
         id: c.credential_id,
@@ -254,7 +254,7 @@ export class PasskeyService {
         expectedChallenge: chal.challenge,
         expectedOrigin: getExpectedOrigins(),
         expectedRPID: env.RP_ID,
-        requireUserVerification: false,
+        requireUserVerification: true,
       });
     } catch (err: any) {
       throw new AuthError(
@@ -402,7 +402,7 @@ export class PasskeyService {
     const options = await generateAuthenticationOptions({
       rpID: env.RP_ID,
       allowCredentials,
-      userVerification: 'preferred',
+      userVerification: 'required',
     });
 
     // Store challenge with 5-minute TTL
@@ -584,7 +584,7 @@ export class PasskeyService {
           counter: Number(cred.counter),
           transports: cred.transports as any,
         },
-        requireUserVerification: false,
+        requireUserVerification: true,
       });
     } catch (err: any) {
       throw new AuthError(

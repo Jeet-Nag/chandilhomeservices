@@ -204,7 +204,7 @@ async function runPasskeyFrontendTests() {
             challenge: 'test-challenge-base64url-32bytes',
             timeout: 60000,
             rpId: 'localhost',
-            userVerification: 'preferred',
+            userVerification: 'required',
           },
         }),
       } as any;
@@ -493,7 +493,11 @@ async function runPasskeyFrontendTests() {
   testAssert(!loginScreenSrc.includes('useEffect'), '9.2 LoginScreen does not contain useEffect');
   testAssert(!loginScreenSrc.includes('componentDidMount'), '9.3 LoginScreen does not contain componentDidMount');
   testAssert(!loginScreenSrc.includes('startAuthentication()'), '9.4 LoginScreen does not call startAuthentication directly');
-  testAssert(!loginScreenSrc.includes('loginWithPasskey()'), '9.5 LoginScreen does not invoke loginWithPasskey at top-level');
+  const bodyBeforeReturn = loginScreenSrc.match(/export function LoginScreen\(\)\s*\{([\s\S]*?)return\s*\(/)?.[1] || '';
+  const bodyOutsideHandlers = bodyBeforeReturn
+    .replace(/const\s+handleLoginSubmit[\s\S]*?\};/, '')
+    .replace(/const\s+handleRegisterSubmit[\s\S]*?\};/, '');
+  testAssert(!/\bloginWithPasskey\s*\(/.test(bodyOutsideHandlers), '9.5 LoginScreen does not invoke loginWithPasskey at top-level');
 
   // 9.3 Mount state: authLoading is false, no ceremony underway
   testAssert(authLoading.value === false, '9.6 authLoading is false when unauthenticated screen mounts');
@@ -556,7 +560,18 @@ async function runPasskeyFrontendTests() {
   });
   globalThis.fetch = async (url: any) => {
     if (url.toString().endsWith('/api/auth/passkey/register-options')) {
-      return { ok: true, json: async () => ({ success: true, data: { challenge: 'reg-chal-456' } }) } as any;
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            challenge: 'reg-chal-456',
+            rp: { name: 'Chandil Home Services', id: 'localhost' },
+            user: { id: 'dXNlci0y', name: '9811002200', displayName: 'New User' },
+            pubKeyCredParams: [{ alg: -7, type: 'public-key' }],
+          },
+        }),
+      } as any;
     }
     if (url.toString().endsWith('/api/auth/passkey/register-verify')) {
       return { ok: true, json: async () => ({ success: true, data: { token: 'reg.jwt', user: { id: 'u2', phone: '9811002200', role: 'customer' } } }) } as any;

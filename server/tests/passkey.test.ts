@@ -133,6 +133,7 @@ const PHONES = {
   jwtCheck:          '9100000008',
   dupCred:           '9100000009',
   counterUpdate:     '9100000010',
+  uvSecurity:        '9100000011',
 };
 
 // ─── suite ────────────────────────────────────────────────────────────────────
@@ -178,6 +179,11 @@ async function runTests(): Promise<void> {
     assert.ok(body.data.rp?.id, 'rpId must be present');
     assert.strictEqual(body.data.rp.id, env.RP_ID);
     assert.strictEqual(body.data.rp.name, env.RP_NAME);
+    assert.strictEqual(
+      body.data.authenticatorSelection?.userVerification,
+      'required',
+      'authenticatorSelection.userVerification must be required'
+    );
     // Verify challenge was persisted
     const { rows } = await pool.query(
       `SELECT id FROM webauthn_challenges WHERE challenge = $1 AND flow_type = 'registration'`,
@@ -443,6 +449,7 @@ async function runTests(): Promise<void> {
     assert.strictEqual(body.success, true);
     assert.ok(body.data.challenge, 'challenge must be present');
     assert.strictEqual(body.data.rpId, env.RP_ID);
+    assert.strictEqual(body.data.userVerification, 'required', 'userVerification must be required');
     // Verify stored in DB
     const { rows } = await pool.query(
       `SELECT id FROM webauthn_challenges WHERE challenge = $1 AND flow_type = 'login'`,
@@ -462,6 +469,7 @@ async function runTests(): Promise<void> {
     });
     assert.strictEqual(res.statusCode, 200);
     const body = res.json();
+    assert.strictEqual(body.data.userVerification, 'required', 'userVerification must be required');
     assert.ok(Array.isArray(body.data.allowCredentials), 'allowCredentials must be array');
     const found = body.data.allowCredentials.some((c: any) => c.id === cid);
     assert.ok(found, 'Known credential must appear in allowCredentials');
@@ -947,6 +955,233 @@ async function runTests(): Promise<void> {
   await it('11.4 POST /api/auth/passkey/login-verify is registered (not 404)', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/auth/passkey/login-verify', payload: {} });
     assert.notStrictEqual(res.statusCode, 404, 'login-verify must be registered');
+  });
+
+  // ─── 12. USER VERIFICATION (UV) SECURITY ENFORCEMENT ────────────────────────
+  console.log('\n--- 12. User Verification (UV) Security Enforcement ---');
+
+  await it('12.1 Registration options require user verification (userVerification === "required")', async () => {
+    const opts = await passkeyService.generateRegistrationOptions(PHONES.uvSecurity);
+    assert.strictEqual(
+      opts.authenticatorSelection?.userVerification,
+      'required',
+      'authenticatorSelection.userVerification must be "required"'
+    );
+  });
+
+  await it('12.2 Authentication options require user verification (userVerification === "required")', async () => {
+    const optsDiscoverable = await passkeyService.generateLoginOptions();
+    assert.strictEqual(
+      optsDiscoverable.userVerification,
+      'required',
+      'Discoverable login options userVerification must be "required"'
+    );
+
+    const optsPhone = await passkeyService.generateLoginOptions(PHONES.uvSecurity);
+    assert.strictEqual(
+      optsPhone.userVerification,
+      'required',
+      'Phone-hinted login options userVerification must be "required"'
+    );
+  });
+
+  await it('12.3 Passkey assertion without UV flag (flags & 0x04 === 0, UV=0) is strictly rejected', async () => {
+    const uid = await seedUser(pool, PHONES.uvSecurity, 'customer');
+    const keyPair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const jwk = keyPair.publicKey.export({ format: 'jwk' });
+    const x = Buffer.from(jwk.x!, 'base64url');
+    const y = Buffer.from(jwk.y!, 'base64url');
+    // Encode P-256 COSE Public Key: a5 (map:5), 1:2 (EC2), 3:-7 (ES256), -1:1 (P-256), -2:x, -3:y
+    const cosePublicKey = Buffer.concat([
+      Buffer.from('a5010203262001215820', 'hex'),
+      x,
+      Buffer.from('225820', 'hex'),
+      y,
+    ]);
+
+    const credId = randomB64url(32);
+    await pool.query(
+      `INSERT INTO user_credentials (user_id, credential_id, public_key, counter, device_type, backed_up, transports)
+       VALUES ($1, $2, $3, 0, 'single_device', false, ARRAY['internal'])`,
+      [uid, credId, cosePublicKey]
+    );
+
+    const challenge = await seedChallenge(pool, 'login', { userId: uid, phone: PHONES.uvSecurity });
+    const clientData = Buffer.from(
+      JSON.stringify({
+        type: 'webauthn.get',
+        challenge,
+        origin: env.EXPECTED_ORIGIN.split(',')[0].trim(),
+      })
+    );
+    const clientDataHash = crypto.createHash('sha256').update(clientData).digest();
+    const rpIdHash = crypto.createHash('sha256').update(env.RP_ID).digest();
+
+    // AuthenticatorData with flags = 0x01 (UP=1, UV=0; bit 2 is 0)
+    const authDataUV0 = Buffer.concat([
+      rpIdHash,
+      Buffer.from([0x01]), // UP=1, UV=0
+      Buffer.from([0x00, 0x00, 0x00, 0x01]), // counter = 1
+    ]);
+
+    const sigBaseUV0 = Buffer.concat([authDataUV0, clientDataHash]);
+    const signerUV0 = crypto.createSign('SHA256');
+    signerUV0.update(sigBaseUV0);
+    const signatureUV0 = signerUV0.sign(keyPair.privateKey);
+
+    await assert.rejects(
+      () =>
+        passkeyService.verifyLogin({
+          id: credId,
+          rawId: credId,
+          response: {
+            clientDataJSON: clientData.toString('base64url'),
+            authenticatorData: authDataUV0.toString('base64url'),
+            signature: signatureUV0.toString('base64url'),
+          },
+          type: 'public-key',
+          clientExtensionResults: {},
+        }),
+      (err: any) => {
+        assert.strictEqual(err.code, 'AUTHENTICATION_VERIFICATION_FAILED');
+        assert.ok(
+          err.message.includes('User verification required') || err.message.includes('user could not be verified'),
+          `Error message should specify UV failure: ${err.message}`
+        );
+        return true;
+      }
+    );
+  });
+
+  await it('12.4 Passkey assertion with UV flag (flags & 0x04 !== 0, UV=1) is accepted', async () => {
+    const uid = await seedUser(pool, PHONES.uvSecurity, 'customer');
+    const keyPair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const jwk = keyPair.publicKey.export({ format: 'jwk' });
+    const x = Buffer.from(jwk.x!, 'base64url');
+    const y = Buffer.from(jwk.y!, 'base64url');
+    const cosePublicKey = Buffer.concat([
+      Buffer.from('a5010203262001215820', 'hex'),
+      x,
+      Buffer.from('225820', 'hex'),
+      y,
+    ]);
+
+    const credId = randomB64url(32);
+    await pool.query(
+      `INSERT INTO user_credentials (user_id, credential_id, public_key, counter, device_type, backed_up, transports)
+       VALUES ($1, $2, $3, 0, 'single_device', false, ARRAY['internal'])`,
+      [uid, credId, cosePublicKey]
+    );
+
+    const challenge = await seedChallenge(pool, 'login', { userId: uid, phone: PHONES.uvSecurity });
+    const clientData = Buffer.from(
+      JSON.stringify({
+        type: 'webauthn.get',
+        challenge,
+        origin: env.EXPECTED_ORIGIN.split(',')[0].trim(),
+      })
+    );
+    const clientDataHash = crypto.createHash('sha256').update(clientData).digest();
+    const rpIdHash = crypto.createHash('sha256').update(env.RP_ID).digest();
+
+    // AuthenticatorData with flags = 0x05 (UP=1, UV=1; bit 2 is 1)
+    const authDataUV1 = Buffer.concat([
+      rpIdHash,
+      Buffer.from([0x05]), // UP=1, UV=1
+      Buffer.from([0x00, 0x00, 0x00, 0x01]), // counter = 1
+    ]);
+
+    const sigBaseUV1 = Buffer.concat([authDataUV1, clientDataHash]);
+    const signerUV1 = crypto.createSign('SHA256');
+    signerUV1.update(sigBaseUV1);
+    const signatureUV1 = signerUV1.sign(keyPair.privateKey);
+
+    const result = await passkeyService.verifyLogin({
+      id: credId,
+      rawId: credId,
+      response: {
+        clientDataJSON: clientData.toString('base64url'),
+        authenticatorData: authDataUV1.toString('base64url'),
+        signature: signatureUV1.toString('base64url'),
+      },
+      type: 'public-key',
+      clientExtensionResults: {},
+    });
+
+    assert.ok(result.user, 'User object must be returned');
+    assert.strictEqual(result.user.phone, PHONES.uvSecurity);
+    assert.strictEqual(result.user.id, uid);
+    assert.strictEqual(result.tokenVersion, 1);
+
+    // Verify counter updated in DB
+    const { rows: credRows } = await pool.query(
+      `SELECT counter FROM user_credentials WHERE credential_id = $1`,
+      [credId]
+    );
+    assert.strictEqual(Number(credRows[0].counter), 1, 'Credential counter must increment to 1');
+  });
+
+  await it('12.5 UV flag without UP flag (flags = 0x04) is rejected as invalid authenticator data', async () => {
+    const uid = await seedUser(pool, PHONES.uvSecurity, 'customer');
+    const keyPair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const jwk = keyPair.publicKey.export({ format: 'jwk' });
+    const x = Buffer.from(jwk.x!, 'base64url');
+    const y = Buffer.from(jwk.y!, 'base64url');
+    const cosePublicKey = Buffer.concat([
+      Buffer.from('a5010203262001215820', 'hex'),
+      x,
+      Buffer.from('225820', 'hex'),
+      y,
+    ]);
+
+    const credId = randomB64url(32);
+    await pool.query(
+      `INSERT INTO user_credentials (user_id, credential_id, public_key, counter, device_type, backed_up, transports)
+       VALUES ($1, $2, $3, 0, 'single_device', false, ARRAY['internal'])`,
+      [uid, credId, cosePublicKey]
+    );
+
+    const challenge = await seedChallenge(pool, 'login', { userId: uid, phone: PHONES.uvSecurity });
+    const clientData = Buffer.from(
+      JSON.stringify({
+        type: 'webauthn.get',
+        challenge,
+        origin: env.EXPECTED_ORIGIN.split(',')[0].trim(),
+      })
+    );
+    const clientDataHash = crypto.createHash('sha256').update(clientData).digest();
+    const rpIdHash = crypto.createHash('sha256').update(env.RP_ID).digest();
+
+    // AuthenticatorData with flags = 0x04 (UP=0, UV=1) -> Invalid according to WebAuthn spec
+    const authDataNoUP = Buffer.concat([
+      rpIdHash,
+      Buffer.from([0x04]),
+      Buffer.from([0x00, 0x00, 0x00, 0x01]),
+    ]);
+
+    const sigBase = Buffer.concat([authDataNoUP, clientDataHash]);
+    const signer = crypto.createSign('SHA256');
+    signer.update(sigBase);
+    const signature = signer.sign(keyPair.privateKey);
+
+    await assert.rejects(
+      () =>
+        passkeyService.verifyLogin({
+          id: credId,
+          rawId: credId,
+          response: {
+            clientDataJSON: clientData.toString('base64url'),
+            authenticatorData: authDataNoUP.toString('base64url'),
+            signature: signature.toString('base64url'),
+          },
+          type: 'public-key',
+          clientExtensionResults: {},
+        }),
+      (err: any) => {
+        assert.strictEqual(err.code, 'AUTHENTICATION_VERIFICATION_FAILED');
+        return true;
+      }
+    );
   });
 
   // ─── cleanup ─────────────────────────────────────────────────────────────────
