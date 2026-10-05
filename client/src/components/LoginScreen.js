@@ -38,6 +38,7 @@ export function LoginScreen() {
                                             authMode.value = 'register';
                                             authError.value = null;
                                             authCancelled.value = false;
+                                            authLoading.value = false;
                                         }, class: "text-sm font-semibold text-brand hover:underline min-h-[44px] px-3 py-2", children: t('auth.switch_to_register') }) })] })) : (
                         /* --- PASSKEY REGISTRATION FLOW --- */
                         _jsxs("form", { onSubmit: handleRegisterSubmit, class: "space-y-4", children: [_jsxs("div", { children: [_jsxs("label", { for: "register-phone-input", class: "block text-sm font-semibold text-text-main mb-1.5", children: [t('auth.phone_label'), " *"] }), _jsxs("div", { class: "relative flex items-center", children: [_jsx("span", { class: "absolute left-3 text-text-sub font-semibold text-base select-none", children: "+91" }), _jsx("input", { id: "register-phone-input", type: "tel", inputMode: "tel", maxLength: 10, placeholder: t('auth.phone_placeholder'), value: phoneInput.value, onInput: (e) => {
@@ -54,5 +55,6 @@ export function LoginScreen() {
                                             authMode.value = 'login';
                                             authError.value = null;
                                             authCancelled.value = false;
+                                            authLoading.value = false;
                                         }, class: "text-sm font-semibold text-brand hover:underline min-h-[44px] px-3 py-2", children: t('auth.switch_to_login') }) })] }))] }) }), _jsx("footer", { class: "max-w-md mx-auto w-full text-center py-3 text-xs text-text-sub", children: _jsx("span", { children: t('home.service_area_label') }) })] }));
 }

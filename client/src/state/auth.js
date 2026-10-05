@@ -5,6 +5,7 @@ import { currentLanguage, selectLanguage } from './language';
 export const PasskeyBridge = registerPlugin('PasskeyBridge');
 const TOKEN_KEY = 'chandil_token';
 const USER_KEY = 'chandil_user';
+export const REGISTERED_HINT_KEY = 'chandil_has_passkey';
 function getInitialToken() {
     try {
         return localStorage.getItem(TOKEN_KEY);
@@ -22,10 +23,27 @@ function getInitialUser() {
         return null;
     }
 }
+/**
+ * Determines initial auth mode for UX layout.
+ * - First-time user (no session & no client registration hint): default to 'register' (Create Passkey)
+ * - Returning user (has session or previously registered on this client): default to 'login' (Sign in with Passkey)
+ * Note: this is strictly a client UX layout hint; backend remains authoritative for all authentication.
+ */
+export function getInitialAuthMode() {
+    try {
+        if (localStorage.getItem(REGISTERED_HINT_KEY) === 'true' || localStorage.getItem(TOKEN_KEY)) {
+            return 'login';
+        }
+    }
+    catch {
+        // LocalStorage restricted or unavailable
+    }
+    return 'register';
+}
 export const authToken = signal(getInitialToken());
 export const currentUser = signal(getInitialUser());
 export const isAuthenticated = computed(() => !!authToken.value && !!currentUser.value);
-export const authMode = signal('login');
+export const authMode = signal(getInitialAuthMode());
 export const phoneInput = signal('');
 export const fullNameInput = signal('');
 export const authLoading = signal(false);
@@ -116,6 +134,7 @@ export async function loginWithPasskey(phoneHint) {
         try {
             localStorage.setItem(TOKEN_KEY, token);
             localStorage.setItem(USER_KEY, JSON.stringify(user));
+            localStorage.setItem(REGISTERED_HINT_KEY, 'true');
         }
         catch {
             // Ignore localStorage quotas
@@ -235,6 +254,7 @@ export async function registerPasskey(customPhone, customName) {
         try {
             localStorage.setItem(TOKEN_KEY, token);
             localStorage.setItem(USER_KEY, JSON.stringify(user));
+            localStorage.setItem(REGISTERED_HINT_KEY, 'true');
         }
         catch {
             // Ignore localStorage quotas
@@ -246,6 +266,7 @@ export async function registerPasskey(customPhone, customName) {
         fullNameInput.value = '';
         authError.value = null;
         authCancelled.value = false;
+        authLoading.value = false;
         authMode.value = 'login';
         return true;
     }
@@ -302,6 +323,7 @@ export async function logout() {
     fullNameInput.value = '';
     authError.value = null;
     authCancelled.value = false;
+    authLoading.value = false;
     try {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
@@ -338,6 +360,8 @@ export function handleSessionExpired() {
         // Ignore localStorage errors
     }
     authMode.value = 'login';
+    authLoading.value = false;
+    authCancelled.value = false;
     authError.value = currentLanguage.value === 'hi'
         ? 'सत्र समाप्त हो गया है। कृपया पुनः लॉगिन करें।'
         : 'Session expired. Please log in again.';

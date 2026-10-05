@@ -149,6 +149,7 @@ export function LoginScreen() {
                     authMode.value = 'register';
                     authError.value = null;
                     authCancelled.value = false;
+                    authLoading.value = false;
                   }}
                   class="text-sm font-semibold text-brand hover:underline min-h-[44px] px-3 py-2"
                 >
@@ -233,6 +234,7 @@ export function LoginScreen() {
                     authMode.value = 'login';
                     authError.value = null;
                     authCancelled.value = false;
+                    authLoading.value = false;
                   }}
                   class="text-sm font-semibold text-brand hover:underline min-h-[44px] px-3 py-2"
                 >

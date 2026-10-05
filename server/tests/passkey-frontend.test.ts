@@ -112,6 +112,8 @@ const {
   refreshSession,
   logout,
   handleSessionExpired,
+  REGISTERED_HINT_KEY,
+  getInitialAuthMode,
 } = await import('../../client/src/state/auth');
 
 const { currentLanguage, selectLanguage, t } = await import('../../client/src/state/language');
@@ -478,6 +480,99 @@ async function runPasskeyFrontendTests() {
     }
   }
   testAssert(pureHindiAuth, '8.3 Zero parenthetical English in Hindi auth keys');
+
+  // --- 9. First-Launch & Returning-User UX / Zero Auto-Auth on Mount ---
+  console.log('\n--- 9. First-Launch & Returning-User UX / Zero Auto-Auth on Mount ---');
+  resetState();
+
+  // 9.1 First-time user in clean client context defaults to 'register' (Create Passkey)
+  mockLocalStorage.clear();
+  testAssert(getInitialAuthMode() === 'register', '9.1 First-time user defaults to register mode (Create Passkey)');
+
+  // 9.2 LoginScreen component audit: zero automatic authentication calls on mount
+  testAssert(!loginScreenSrc.includes('useEffect'), '9.2 LoginScreen does not contain useEffect');
+  testAssert(!loginScreenSrc.includes('componentDidMount'), '9.3 LoginScreen does not contain componentDidMount');
+  testAssert(!loginScreenSrc.includes('startAuthentication()'), '9.4 LoginScreen does not call startAuthentication directly');
+  testAssert(!loginScreenSrc.includes('loginWithPasskey()'), '9.5 LoginScreen does not invoke loginWithPasskey at top-level');
+
+  // 9.3 Mount state: authLoading is false, no ceremony underway
+  testAssert(authLoading.value === false, '9.6 authLoading is false when unauthenticated screen mounts');
+
+  // 9.4 Explicit button click starts login ceremony
+  let loginCeremonyStarted = false;
+  setMockNavigator({
+    get: async () => {
+      loginCeremonyStarted = true;
+      return createMockAuthCredential();
+    },
+  });
+  globalThis.fetch = async (url: any) => {
+    if (url.toString().endsWith('/api/auth/passkey/login-options')) {
+      return { ok: true, json: async () => ({ success: true, data: { challenge: 'chal-123' } }) } as any;
+    }
+    if (url.toString().endsWith('/api/auth/passkey/login-verify')) {
+      return { ok: true, json: async () => ({ success: true, data: { token: 't1', user: { id: 'u1', phone: '9811001100', role: 'customer' } } }) } as any;
+    }
+    return { ok: true, json: async () => ({ success: true }) } as any;
+  };
+  testAssert(!loginCeremonyStarted, '9.7 Login ceremony not started before user clicks Sign In');
+  await loginWithPasskey('9811001100');
+  testAssert(loginCeremonyStarted, '9.8 Clicking Sign In explicitly starts login ceremony');
+  testAssert(mockLocalStorageStore[REGISTERED_HINT_KEY] === 'true', '9.9 Successful login persists REGISTERED_HINT_KEY');
+
+  // 9.5 Returning user context defaults to 'login' (Sign in with Passkey)
+  mockLocalStorage.removeItem('chandil_token');
+  mockLocalStorage.removeItem('chandil_user');
+  testAssert(getInitialAuthMode() === 'login', '9.10 Returning user with REGISTERED_HINT_KEY defaults to login mode');
+
+  // 9.6 Logout does not automatically start authentication
+  resetState();
+  mockLocalStorageStore[REGISTERED_HINT_KEY] = 'true';
+  mockLocalStorageStore['chandil_token'] = 'active.jwt';
+  authToken.value = 'active.jwt';
+  let autoAuthTriggeredOnLogout = false;
+  setMockNavigator({
+    get: async () => {
+      autoAuthTriggeredOnLogout = true;
+      return createMockAuthCredential();
+    },
+  });
+  await logout();
+  testAssert(authToken.value === null, '9.11 Logout clears authToken');
+  testAssert(authMode.value === 'login', '9.12 Logout sets mode to login for returning user');
+  testAssert(!autoAuthTriggeredOnLogout, '9.13 Logout does NOT automatically trigger Passkey authentication');
+  testAssert(authLoading.value === false, '9.14 authLoading remains false after logout');
+
+  // 9.7 Create Passkey registration flow transitions to authenticated CustomerHome
+  resetState();
+  mockLocalStorage.clear();
+  authMode.value = 'register';
+  let regCeremonyStarted = false;
+  setMockNavigator({
+    create: async () => {
+      regCeremonyStarted = true;
+      return createMockRegCredential();
+    },
+  });
+  globalThis.fetch = async (url: any) => {
+    if (url.toString().endsWith('/api/auth/passkey/register-options')) {
+      return { ok: true, json: async () => ({ success: true, data: { challenge: 'reg-chal-456' } }) } as any;
+    }
+    if (url.toString().endsWith('/api/auth/passkey/register-verify')) {
+      return { ok: true, json: async () => ({ success: true, data: { token: 'reg.jwt', user: { id: 'u2', phone: '9811002200', role: 'customer' } } }) } as any;
+    }
+    return { ok: true, json: async () => ({ success: true }) } as any;
+  };
+  testAssert(!regCeremonyStarted, '9.15 Registration ceremony not started before user clicks Create Passkey');
+  await registerPasskey('9811002200', 'New User');
+  testAssert(regCeremonyStarted, '9.16 Clicking Create Passkey explicitly starts registration');
+  testAssert(isAuthenticated.value === true, '9.17 Registration transitions to authenticated (routes to CustomerHome)');
+  testAssert(mockLocalStorageStore[REGISTERED_HINT_KEY] === 'true', '9.18 Registration sets REGISTERED_HINT_KEY in client context');
+
+  // 9.8 Language behavior remains intact throughout ceremonies
+  testAssert(currentLanguage.value === 'hi', '9.19 Selected language preserved across ceremonies');
+  selectLanguage('en');
+  testAssert(currentLanguage.value === 'en', '9.20 Language switches to en cleanly');
 
   // Summary
   console.log('\n============================================================');
