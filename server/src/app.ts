@@ -145,6 +145,7 @@ export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstan
     root: clientDistPath,
     prefix: '/',
     wildcard: false,
+    serveDotFiles: true,
     setHeaders: (reply, filePath) => {
       const normalizedPath = filePath.replace(/\\/g, '/');
       if (normalizedPath.endsWith('index.html')) {

@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "in.chandilservices.app",
+      "sha256_cert_fingerprints": [
+        "42:FA:86:31:DF:58:EB:67:ED:F6:AA:74:58:C2:EF:F1:54:5D:0D:66:24:B7:5D:05:75:3D:E0:E1:77:20:91:0F"
+      ]
+    }
+  }
+]
