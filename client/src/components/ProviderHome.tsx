@@ -105,6 +105,9 @@ export function ProviderHome() {
             <span class="text-xs font-semibold text-text-main truncate max-w-[180px]">
               {providerDisplayName}
             </span>
+            <span id="worker-verified-tick" class="inline-flex items-center text-xs font-bold text-action">
+              {t('worker.verified_tick')}
+            </span>
           </div>
 
           {/* Bilingual Toggle */}

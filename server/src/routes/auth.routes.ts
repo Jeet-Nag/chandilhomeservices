@@ -6,27 +6,73 @@ import { authenticate } from '../middleware/auth';
 import { ApiResponse, User } from '@shared';
 
 
-const passkeyRegisterOptionsSchema = z.object({
-  phone: z.string().regex(/^[6-9]\d{9}$/, 'Phone must be a valid 10-digit Indian mobile number'),
-  fullName: z.string().min(1).max(100).optional(),
-  preferredLanguage: z.enum(['en', 'hi']).optional(),
-});
+const passkeyRegisterOptionsSchema = z
+  .object({
+    phone: z.string().regex(/^[6-9]\d{9}$/, 'Phone must be a valid 10-digit Indian mobile number'),
+    fullName: z.string().max(100).optional(),
+    preferredLanguage: z.enum(['en', 'hi']).optional(),
+    role: z.string().optional(),
+    flow: z.enum(['customer', 'worker']).optional(),
+  })
+  .superRefine((data, ctx) => {
+    const isCustomerExplicit = data.role === 'customer' || data.flow === 'customer';
+    if (isCustomerExplicit) {
+      if (!data.fullName || data.fullName.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['fullName'],
+          message: 'Full name is required for customer registration',
+        });
+      }
+    }
+    if (data.fullName !== undefined && data.fullName.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['fullName'],
+        message: 'Full name cannot be blank',
+      });
+    }
+  });
 
-const passkeyRegisterVerifySchema = z.object({
-  phone: z.string().regex(/^[6-9]\d{9}$/, 'Phone must be a valid 10-digit Indian mobile number'),
-  response: z.object({
-    id: z.string(),
-    rawId: z.string(),
-    response: z.object({
-      clientDataJSON: z.string(),
-      attestationObject: z.string(),
-    }),
-    type: z.string(),
-  }).passthrough(),
-  fullName: z.string().min(1).max(100).optional(),
-  preferredLanguage: z.enum(['en', 'hi']).optional(),
-  friendlyName: z.string().max(100).optional(),
-});
+const passkeyRegisterVerifySchema = z
+  .object({
+    phone: z.string().regex(/^[6-9]\d{9}$/, 'Phone must be a valid 10-digit Indian mobile number'),
+    response: z
+      .object({
+        id: z.string(),
+        rawId: z.string(),
+        response: z.object({
+          clientDataJSON: z.string(),
+          attestationObject: z.string(),
+        }),
+        type: z.string(),
+      })
+      .passthrough(),
+    fullName: z.string().max(100).optional(),
+    preferredLanguage: z.enum(['en', 'hi']).optional(),
+    friendlyName: z.string().max(100).optional(),
+    role: z.string().optional(),
+    flow: z.enum(['customer', 'worker']).optional(),
+  })
+  .superRefine((data, ctx) => {
+    const isCustomerExplicit = data.role === 'customer' || data.flow === 'customer';
+    if (isCustomerExplicit) {
+      if (!data.fullName || data.fullName.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['fullName'],
+          message: 'Full name is required for customer registration',
+        });
+      }
+    }
+    if (data.fullName !== undefined && data.fullName.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['fullName'],
+        message: 'Full name cannot be blank',
+      });
+    }
+  });
 
 const passkeyLoginOptionsSchema = z.object({
   phone: z.string().regex(/^[6-9]\d{9}$/, 'Phone must be a valid 10-digit Indian mobile number').optional(),

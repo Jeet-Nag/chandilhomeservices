@@ -1,5 +1,6 @@
 import { db } from '../db';
-import { AdminProviderView } from '@shared';
+import { AdminProviderView, WorkerVerificationStatus } from '@shared';
+import { workerService } from './worker.service';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -18,6 +19,7 @@ export class AdminProviderError extends Error {
 export interface ListProvidersFilter {
   categoryId?: string;
   isActive?: boolean;
+  verificationStatus?: 'PENDING_VERIFICATION' | 'VERIFIED';
 }
 
 export interface CreateProviderInput {
@@ -39,7 +41,7 @@ interface RawProviderDbRow {
   id: string;
   phone: string;
   fullName: string | null;
-  role: 'provider';
+  role: 'customer' | 'provider' | 'admin';
   preferredLanguage: 'en' | 'hi';
   isActive: boolean;
   categoryId: string;
@@ -48,7 +50,13 @@ interface RawProviderDbRow {
   serviceArea: string;
   isAvailable: boolean;
   rating: number | string;
+  verificationStatus: WorkerVerificationStatus;
+  submittedAt: Date | null;
+  verifiedAt: Date | null;
   createdAt: Date;
+  hasAadhaarFront: boolean;
+  hasAadhaarBack: boolean;
+  hasPhoto: boolean;
 }
 
 function mapRawRow(row: RawProviderDbRow): AdminProviderView {
@@ -56,7 +64,7 @@ function mapRawRow(row: RawProviderDbRow): AdminProviderView {
     id: row.id,
     phone: row.phone,
     fullName: row.fullName,
-    role: 'provider',
+    role: row.role as any,
     preferredLanguage: row.preferredLanguage,
     isActive: row.isActive,
     categoryId: row.categoryId,
@@ -64,8 +72,14 @@ function mapRawRow(row: RawProviderDbRow): AdminProviderView {
     categoryTitleHi: row.categoryTitleHi,
     serviceArea: row.serviceArea,
     isAvailable: row.isAvailable,
-    rating: parseFloat(String(row.rating)),
+    rating: parseFloat(String(row.rating || 5.0)),
+    verificationStatus: row.verificationStatus || 'VERIFIED',
+    submittedAt: row.submittedAt ? (row.submittedAt instanceof Date ? row.submittedAt.toISOString() : String(row.submittedAt)) : null,
+    verifiedAt: row.verifiedAt ? (row.verifiedAt instanceof Date ? row.verifiedAt.toISOString() : String(row.verifiedAt)) : null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
+    hasAadhaarFront: !!row.hasAadhaarFront,
+    hasAadhaarBack: !!row.hasAadhaarBack,
+    hasPhoto: !!row.hasPhoto,
   };
 }
 
@@ -82,7 +96,7 @@ export class AdminProviderService {
   }
 
   /**
-   * List all providers with optional filters (categoryId, isActive).
+   * List all providers and pending workers with optional filters (categoryId, isActive, verificationStatus).
    * Strict deterministic ordering: created_at DESC, id DESC.
    */
   public async listProviders(filters?: ListProvidersFilter): Promise<AdminProviderView[]> {
@@ -91,7 +105,7 @@ export class AdminProviderService {
       throw new AdminProviderError('DATABASE_UNAVAILABLE', 'Database is not available.', 'डेटाबेस अनुपलब्ध है।', 500);
     }
 
-    const conditions: string[] = ["u.role = 'provider'"];
+    const conditions: string[] = ["(u.role = 'provider' OR p.verification_status = 'PENDING_VERIFICATION')"];
     const values: any[] = [];
     let paramIndex = 1;
 
@@ -103,6 +117,11 @@ export class AdminProviderService {
     if (filters?.isActive !== undefined) {
       conditions.push(`u.is_active = $${paramIndex++}`);
       values.push(filters.isActive);
+    }
+
+    if (filters?.verificationStatus !== undefined) {
+      conditions.push(`p.verification_status = $${paramIndex++}`);
+      values.push(filters.verificationStatus);
     }
 
     const query = `
@@ -119,7 +138,13 @@ export class AdminProviderService {
         p.service_area as "serviceArea",
         p.is_available as "isAvailable",
         p.rating,
-        u.created_at as "createdAt"
+        p.verification_status as "verificationStatus",
+        p.submitted_at as "submittedAt",
+        p.verified_at as "verifiedAt",
+        u.created_at as "createdAt",
+        (p.aadhaar_front_data IS NOT NULL) as "hasAadhaarFront",
+        (p.aadhaar_back_data IS NOT NULL) as "hasAadhaarBack",
+        (p.photo_data IS NOT NULL) as "hasPhoto"
       FROM users u
       JOIN provider_profiles p ON u.id = p.user_id
       JOIN service_categories sc ON p.category_id = sc.id
@@ -132,7 +157,7 @@ export class AdminProviderService {
   }
 
   /**
-   * Retrieve a single provider profile by ID.
+   * Retrieve a single provider/worker profile by ID.
    */
   public async getProviderById(id: string): Promise<AdminProviderView> {
     this.validateUuid(id);
@@ -156,11 +181,17 @@ export class AdminProviderService {
         p.service_area as "serviceArea",
         p.is_available as "isAvailable",
         p.rating,
-        u.created_at as "createdAt"
+        p.verification_status as "verificationStatus",
+        p.submitted_at as "submittedAt",
+        p.verified_at as "verifiedAt",
+        u.created_at as "createdAt",
+        (p.aadhaar_front_data IS NOT NULL) as "hasAadhaarFront",
+        (p.aadhaar_back_data IS NOT NULL) as "hasAadhaarBack",
+        (p.photo_data IS NOT NULL) as "hasPhoto"
       FROM users u
       JOIN provider_profiles p ON u.id = p.user_id
       JOIN service_categories sc ON p.category_id = sc.id
-      WHERE u.id = $1 AND u.role = 'provider'
+      WHERE u.id = $1 AND (u.role = 'provider' OR p.verification_status = 'PENDING_VERIFICATION')
     `;
 
     const { rows } = await pool.query<RawProviderDbRow>(query, [id]);
@@ -174,6 +205,14 @@ export class AdminProviderService {
     }
 
     return mapRawRow(rows[0]);
+  }
+
+  public async verifyWorker(workerId: string, adminId: string): Promise<AdminProviderView> {
+    return await workerService.verifyWorker(workerId, adminId);
+  }
+
+  public async getAadhaarDocument(providerId: string, side: 'front' | 'back'): Promise<{ buffer: Buffer; mimeType: string }> {
+    return await workerService.getAadhaarDocument(providerId, side);
   }
 
   /**

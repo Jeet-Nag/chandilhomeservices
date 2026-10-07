@@ -15,6 +15,7 @@ import { audioRoutes } from './routes/audio.routes';
 import { providerRoutes } from './routes/provider.routes';
 import { adminRoutes } from './routes/admin.routes';
 import { configRoutes } from './routes/config.routes';
+import { workerRoutes } from './routes/worker.routes';
 import { ApiResponse } from '@shared';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -79,6 +80,7 @@ export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstan
 
   const app = Fastify({
     logger: currentEnv !== 'test',
+    bodyLimit: 25 * 1024 * 1024,
   });
 
   // CORS configuration
@@ -105,13 +107,14 @@ export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstan
     secret: currentJwtSecret,
   });
 
-  // Register Auth, Category, Booking, Audio, Provider, Admin, Config and RBAC routes
+  // Register Auth, Category, Booking, Audio, Provider, Admin, Worker, Config and RBAC routes
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(categoryRoutes, { prefix: '/api/categories' });
   await app.register(bookingRoutes, { prefix: '/api/bookings' });
   await app.register(audioRoutes, { prefix: '/api/audio' });
   await app.register(providerRoutes, { prefix: '/api/provider' });
   await app.register(adminRoutes, { prefix: '/api/admin' });
+  await app.register(workerRoutes, { prefix: '/api' });
   await app.register(configRoutes, { prefix: '/api/config' });
   await app.register(rbacTestRoutes);
 
@@ -148,7 +151,7 @@ export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstan
     serveDotFiles: true,
     setHeaders: (reply, filePath) => {
       const normalizedPath = filePath.replace(/\\/g, '/');
-      if (normalizedPath.endsWith('index.html')) {
+      if (normalizedPath.endsWith('index.html') || normalizedPath.endsWith('admin.html')) {
         reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
         reply.header('Pragma', 'no-cache');
         reply.header('Expires', '0');
@@ -159,6 +162,38 @@ export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstan
       }
     },
   });
+
+  // Dedicated Admin Web Panel routes
+  const serveAdminHtml = async (_request: any, reply: any) => {
+    const adminPath = path.join(clientDistPath, 'admin.html');
+    if (fs.existsSync(adminPath)) {
+      reply.type('text/html; charset=utf-8');
+      reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+      reply.header('Pragma', 'no-cache');
+      reply.header('Expires', '0');
+      return reply.sendFile('admin.html');
+    }
+    const indexPath = path.join(clientDistPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      reply.type('text/html; charset=utf-8');
+      reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+      reply.header('Pragma', 'no-cache');
+      reply.header('Expires', '0');
+      return reply.sendFile('index.html');
+    }
+    return reply.status(404).send({
+      success: false,
+      error: {
+        code: 'NOT_FOUND',
+        messageEn: 'Admin web panel is not built or admin.html is missing.',
+        messageHi: 'एडमिन वेब पैनल उपलब्ध नहीं है।',
+      },
+    });
+  };
+
+  app.get('/admin', serveAdminHtml);
+  app.get('/admin/', serveAdminHtml);
+  app.get('/admin/*', serveAdminHtml);
 
   // SPA fallback and strict route exclusion handling
   app.setNotFoundHandler(async (request, reply) => {
@@ -214,7 +249,7 @@ export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstan
     }
 
     // 5. If request has a file extension (e.g. .js, .css, .png, etc.) and was not found on disk, do not serve HTML
-    if (path.extname(pathname) !== '' && pathname !== '/index.html') {
+    if (path.extname(pathname) !== '' && pathname !== '/index.html' && pathname !== '/admin.html') {
       const response: ApiResponse = {
         success: false,
         error: {
@@ -226,7 +261,18 @@ export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstan
       return reply.status(404).send(response);
     }
 
-    // 6. SPA fallback: serve index.html for frontend navigation routes
+    // 6. SPA fallback: serve admin.html for /admin navigation, index.html for other frontend routes
+    if (pathname.startsWith('/admin')) {
+      const adminPath = path.join(clientDistPath, 'admin.html');
+      if (fs.existsSync(adminPath)) {
+        reply.type('text/html; charset=utf-8');
+        reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+        reply.header('Pragma', 'no-cache');
+        reply.header('Expires', '0');
+        return reply.sendFile('admin.html');
+      }
+    }
+
     const indexPath = path.join(clientDistPath, 'index.html');
     if (fs.existsSync(indexPath)) {
       reply.type('text/html; charset=utf-8');

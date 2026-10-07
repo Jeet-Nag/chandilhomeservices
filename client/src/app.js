@@ -1,6 +1,8 @@
 import { jsx as _jsx, jsxs as _jsxs } from "preact/jsx-runtime";
+import { useEffect } from 'preact/hooks';
 import { isLanguageChosen, selectLanguage } from './state/language';
-import { isAuthenticated, currentUser } from './state/auth';
+import { isAuthenticated, currentUser, selectedOnboardingRole } from './state/auth';
+import { workerStatus, fetchWorkerStatus } from './state/worker';
 import { bookingStep } from './state/booking';
 import { selectedJobId } from './state/provider';
 import { LoginScreen } from './components/LoginScreen';
@@ -12,8 +14,17 @@ import { BookingHistory } from './components/BookingHistory';
 import { BookingDetailScreen } from './components/BookingDetailScreen';
 import { ProviderHome } from './components/ProviderHome';
 import { ProviderJobDetailScreen } from './components/ProviderJobDetailScreen';
-import { AdminShell } from './components/AdminShell';
+import { WorkerSetupScreen } from './components/WorkerSetupScreen';
+import { WorkerPendingScreen } from './components/WorkerPendingScreen';
+import { logout } from './state/auth';
+import { t } from './state/language';
 export function App() {
+    // Sync worker onboarding/verification status when authenticated as customer
+    useEffect(() => {
+        if (isAuthenticated.value && currentUser.value?.role === 'customer') {
+            fetchWorkerStatus();
+        }
+    }, [isAuthenticated.value, currentUser.value?.id]);
     // 1. First-launch Language Selection Screen
     // (Strict requirement: do NOT silently assume Hindi or English on fresh install)
     if (!isLanguageChosen.value) {
@@ -23,10 +34,9 @@ export function App() {
     if (!isAuthenticated.value) {
         return _jsx(LoginScreen, {});
     }
-    const isAdminPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
-    // 3. Admin Role Flow or /admin Protected Area
-    if (currentUser.value?.role === 'admin' || isAdminPath) {
-        return _jsx(AdminShell, {});
+    // 3. Admin Account Handling on Mobile App (Directs to Web Admin Portal)
+    if (currentUser.value?.role === 'admin') {
+        return (_jsx("div", { class: "min-h-screen flex items-center justify-center p-4 bg-background", children: _jsxs("div", { class: "w-full max-w-md bg-surface border border-border rounded-lg p-6 shadow-sm text-center", children: [_jsx("h2", { class: "text-lg font-bold text-brand mb-2", children: "Admin Account Detected" }), _jsx("p", { class: "text-sm text-text-sub mb-6", children: "This application is for customers and service providers. Please use the Admin Web Portal on a browser at /admin to manage operations." }), _jsx("button", { onClick: () => logout(), class: "w-full min-h-[48px] px-4 py-3 bg-brand text-white font-medium rounded-lg hover:bg-brand-dark transition-colors", children: t('auth.logout') })] }) }));
     }
     // 4. Provider Role Flow
     if (currentUser.value?.role === 'provider') {
@@ -35,7 +45,14 @@ export function App() {
         }
         return _jsx(ProviderHome, {});
     }
-    // 4. Customer Role Flow (Customer App)
+    // 5. Worker Onboarding State Handling
+    if (workerStatus.value === 'PENDING_VERIFICATION') {
+        return _jsx(WorkerPendingScreen, {});
+    }
+    if (selectedOnboardingRole.value === 'worker' && workerStatus.value !== 'VERIFIED') {
+        return _jsx(WorkerSetupScreen, {});
+    }
+    // 6. Customer Role Flow (Customer App)
     switch (bookingStep.value) {
         case 'details':
             return _jsx(BookingForm, {});

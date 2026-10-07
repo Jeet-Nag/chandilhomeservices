@@ -1,5 +1,6 @@
 import {
   authMode,
+  selectedOnboardingRole,
   phoneInput,
   fullNameInput,
   authLoading,
@@ -9,20 +10,27 @@ import {
   registerPasskey,
 } from '../state/auth';
 import { currentLanguage, selectLanguage, t } from '../state/language';
-import { SpinnerIcon, AlertCircleIcon } from './icons';
+import { SpinnerIcon, AlertCircleIcon, ChevronRightIcon } from './icons';
 
 export function LoginScreen() {
+  const isLoginMode = authMode.value === 'login';
+  const role = selectedOnboardingRole.value;
+  const lang = currentLanguage.value || 'en';
+
   const handleLoginSubmit = (e: Event) => {
     e.preventDefault();
     loginWithPasskey();
   };
 
-  const handleRegisterSubmit = (e: Event) => {
+  const handleCustomerRegisterSubmit = (e: Event) => {
     e.preventDefault();
-    registerPasskey();
+    registerPasskey(phoneInput.value, fullNameInput.value, 'customer');
   };
 
-  const isLoginMode = authMode.value === 'login';
+  const handleWorkerRegisterSubmit = (e: Event) => {
+    e.preventDefault();
+    registerPasskey(phoneInput.value, undefined, 'worker');
+  };
 
   return (
     <div class="min-h-screen flex flex-col justify-between bg-background p-4">
@@ -31,9 +39,10 @@ export function LoginScreen() {
         <div class="font-bold text-brand text-lg">{t('app.title')}</div>
         <div class="flex items-center space-x-1 bg-surface p-1 rounded border border-border">
           <button
+            type="button"
             onClick={() => selectLanguage('en')}
             class={`px-2.5 py-1 text-xs font-semibold rounded min-h-[32px] transition-colors ${
-              currentLanguage.value === 'en'
+              lang === 'en'
                 ? 'bg-brand text-white'
                 : 'text-text-sub hover:text-text-main'
             }`}
@@ -41,9 +50,10 @@ export function LoginScreen() {
             EN
           </button>
           <button
+            type="button"
             onClick={() => selectLanguage('hi')}
             class={`px-2.5 py-1 text-xs font-semibold rounded min-h-[32px] transition-colors ${
-              currentLanguage.value === 'hi'
+              lang === 'hi'
                 ? 'bg-brand text-white'
                 : 'text-text-sub hover:text-text-main'
             }`}
@@ -53,12 +63,19 @@ export function LoginScreen() {
         </div>
       </header>
 
-      {/* Main Login Card */}
+      {/* Main Container */}
       <main class="max-w-md mx-auto w-full my-auto">
         <div class="bg-surface border border-border rounded-lg p-6 shadow-sm">
+          {/* Card Header */}
           <div class="text-center mb-6">
             <h1 class="text-xl font-bold text-text-main leading-snug">
-              {isLoginMode ? t('auth.login_title') : t('auth.register_title')}
+              {isLoginMode
+                ? t('auth.login_title')
+                : role === 'customer'
+                ? t('onboarding.customer_title')
+                : role === 'worker'
+                ? t('onboarding.worker_title')
+                : t('onboarding.role_title')}
             </h1>
             <p class="text-xs text-text-sub mt-1 leading-relaxed">
               {t('app.tagline')}
@@ -80,6 +97,10 @@ export function LoginScreen() {
                     authCancelled.value = false;
                     if (isLoginMode) {
                       loginWithPasskey();
+                    } else if (role === 'customer') {
+                      registerPasskey(phoneInput.value, fullNameInput.value, 'customer');
+                    } else if (role === 'worker') {
+                      registerPasskey(phoneInput.value, undefined, 'worker');
                     } else {
                       registerPasskey();
                     }
@@ -93,7 +114,9 @@ export function LoginScreen() {
           )}
 
           {isLoginMode ? (
-            /* --- PASSKEY LOGIN FLOW --- */
+            /* ============================================================ */
+            /* 1. PASSKEY LOGIN FLOW                                        */
+            /* ============================================================ */
             <form onSubmit={handleLoginSubmit} class="space-y-4">
               <div>
                 <label for="login-phone-input" class="block text-sm font-semibold text-text-main mb-1.5">
@@ -147,6 +170,7 @@ export function LoginScreen() {
                   id="switch-to-register-btn"
                   onClick={() => {
                     authMode.value = 'register';
+                    selectedOnboardingRole.value = null;
                     authError.value = null;
                     authCancelled.value = false;
                     authLoading.value = false;
@@ -157,9 +181,74 @@ export function LoginScreen() {
                 </button>
               </div>
             </form>
-          ) : (
-            /* --- PASSKEY REGISTRATION FLOW --- */
-            <form onSubmit={handleRegisterSubmit} class="space-y-4">
+          ) : role === null ? (
+            /* ============================================================ */
+            /* 2. SCREEN 1 — ROLE SELECTION ("Who are you?" / "आप कौन हैं?")*/
+            /* ============================================================ */
+            <div class="space-y-4">
+              <button
+                type="button"
+                id="role-select-customer-btn"
+                onClick={() => {
+                  selectedOnboardingRole.value = 'customer';
+                  authError.value = null;
+                  authCancelled.value = false;
+                }}
+                class="w-full min-h-[56px] flex items-center justify-between p-4 border-2 border-border hover:border-brand active:bg-slate-50 rounded-lg text-left transition-colors bg-white group focus:outline-none focus:border-brand"
+              >
+                <div>
+                  <div class="text-base font-bold text-text-main group-hover:text-brand">
+                    {t('onboarding.role_customer')}
+                  </div>
+                  <div class="text-xs text-text-sub mt-0.5">
+                    {t('onboarding.role_customer_sub')}
+                  </div>
+                </div>
+                <span class="text-brand font-bold text-lg">→</span>
+              </button>
+
+              <button
+                type="button"
+                id="role-select-worker-btn"
+                onClick={() => {
+                  selectedOnboardingRole.value = 'worker';
+                  authError.value = null;
+                  authCancelled.value = false;
+                }}
+                class="w-full min-h-[56px] flex items-center justify-between p-4 border-2 border-border hover:border-brand active:bg-slate-50 rounded-lg text-left transition-colors bg-white group focus:outline-none focus:border-brand"
+              >
+                <div>
+                  <div class="text-base font-bold text-text-main group-hover:text-brand">
+                    {t('onboarding.role_worker')}
+                  </div>
+                  <div class="text-xs text-text-sub mt-0.5">
+                    {t('onboarding.role_worker_sub')}
+                  </div>
+                </div>
+                <span class="text-brand font-bold text-lg">→</span>
+              </button>
+
+              <div class="text-center pt-3 border-t border-border">
+                <button
+                  type="button"
+                  id="switch-to-login-btn"
+                  onClick={() => {
+                    authMode.value = 'login';
+                    selectedOnboardingRole.value = null;
+                    authError.value = null;
+                    authCancelled.value = false;
+                  }}
+                  class="text-sm font-semibold text-brand hover:underline min-h-[44px] px-3 py-2"
+                >
+                  {t('onboarding.returning_user_sign_in')}
+                </button>
+              </div>
+            </div>
+          ) : role === 'customer' ? (
+            /* ============================================================ */
+            /* 3. CUSTOMER REGISTRATION (Mobile + Full Name REQUIRED)       */
+            /* ============================================================ */
+            <form onSubmit={handleCustomerRegisterSubmit} class="space-y-4">
               <div>
                 <label for="register-phone-input" class="block text-sm font-semibold text-text-main mb-1.5">
                   {t('auth.phone_label')} *
@@ -190,20 +279,108 @@ export function LoginScreen() {
 
               <div>
                 <label for="register-name-input" class="block text-sm font-semibold text-text-main mb-1.5">
-                  {t('auth.name_label')}
+                  {t('onboarding.full_name_required')}
                 </label>
                 <input
                   id="register-name-input"
                   type="text"
                   maxLength={100}
-                  placeholder={t('auth.name_placeholder')}
+                  placeholder={t('onboarding.full_name_placeholder')}
                   value={fullNameInput.value}
                   onInput={(e) => {
                     fullNameInput.value = (e.target as HTMLInputElement).value;
                     authError.value = null;
                   }}
                   class="w-full px-3 py-3 border-2 border-border rounded-lg text-base text-text-main bg-white focus:outline-none focus:border-brand min-h-[48px]"
+                  required
                 />
+              </div>
+
+              <button
+                type="submit"
+                id="passkey-register-btn"
+                disabled={
+                  authLoading.value ||
+                  phoneInput.value.length !== 10 ||
+                  fullNameInput.value.trim().length === 0
+                }
+                class={`w-full min-h-[48px] px-4 py-3 rounded-lg font-bold text-base transition-colors flex items-center justify-center space-x-2 ${
+                  phoneInput.value.length === 10 &&
+                  fullNameInput.value.trim().length > 0 &&
+                  !authLoading.value
+                    ? 'bg-action hover:bg-action-active text-white cursor-pointer'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                {authLoading.value ? (
+                  <>
+                    <SpinnerIcon size={20} class="text-white" />
+                    <span>{t('auth.registering')}</span>
+                  </>
+                ) : (
+                  <span>{t('onboarding.customer_create_passkey')}</span>
+                )}
+              </button>
+
+              <div class="flex items-center justify-between pt-3 border-t border-border text-xs font-semibold">
+                <button
+                  type="button"
+                  id="back-to-roles-btn"
+                  onClick={() => {
+                    selectedOnboardingRole.value = null;
+                    authError.value = null;
+                  }}
+                  class="text-text-sub hover:text-text-main min-h-[44px] px-2 py-2 flex items-center space-x-1"
+                >
+                  <span>← {lang === 'hi' ? 'वापस जाएं' : 'Back'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="switch-to-login-btn"
+                  onClick={() => {
+                    authMode.value = 'login';
+                    selectedOnboardingRole.value = null;
+                    authError.value = null;
+                    authCancelled.value = false;
+                  }}
+                  class="text-brand hover:underline min-h-[44px] px-2 py-2"
+                >
+                  {t('auth.switch_to_login')}
+                </button>
+              </div>
+            </form>
+          ) : (
+            /* ============================================================ */
+            /* 4. WORKER REGISTRATION (Step 1 - Mobile + Passkey)           */
+            /* ============================================================ */
+            <form onSubmit={handleWorkerRegisterSubmit} class="space-y-4">
+              <div>
+                <label for="register-phone-input" class="block text-sm font-semibold text-text-main mb-1.5">
+                  {t('auth.phone_label')} *
+                </label>
+                <div class="relative flex items-center">
+                  <span class="absolute left-3 text-text-sub font-semibold text-base select-none">
+                    +91
+                  </span>
+                  <input
+                    id="register-phone-input"
+                    type="tel"
+                    inputMode="tel"
+                    maxLength={10}
+                    placeholder={t('auth.phone_placeholder')}
+                    value={phoneInput.value}
+                    onInput={(e) => {
+                      const val = (e.target as HTMLInputElement).value.replace(/\D/g, '');
+                      phoneInput.value = val.slice(0, 10);
+                      authError.value = null;
+                      authCancelled.value = false;
+                    }}
+                    class="w-full pl-14 pr-3 py-3 border-2 border-border rounded-lg text-base font-semibold text-text-main bg-white focus:outline-none focus:border-brand min-h-[48px]"
+                    required
+                    autoFocus
+                  />
+                </div>
               </div>
 
               <button
@@ -226,17 +403,29 @@ export function LoginScreen() {
                 )}
               </button>
 
-              <div class="text-center pt-3 border-t border-border">
+              <div class="flex items-center justify-between pt-3 border-t border-border text-xs font-semibold">
+                <button
+                  type="button"
+                  id="back-to-roles-btn"
+                  onClick={() => {
+                    selectedOnboardingRole.value = null;
+                    authError.value = null;
+                  }}
+                  class="text-text-sub hover:text-text-main min-h-[44px] px-2 py-2 flex items-center space-x-1"
+                >
+                  <span>← {lang === 'hi' ? 'वापस जाएं' : 'Back'}</span>
+                </button>
+
                 <button
                   type="button"
                   id="switch-to-login-btn"
                   onClick={() => {
                     authMode.value = 'login';
+                    selectedOnboardingRole.value = null;
                     authError.value = null;
                     authCancelled.value = false;
-                    authLoading.value = false;
                   }}
-                  class="text-sm font-semibold text-brand hover:underline min-h-[44px] px-3 py-2"
+                  class="text-brand hover:underline min-h-[44px] px-2 py-2"
                 >
                   {t('auth.switch_to_login')}
                 </button>

@@ -55,6 +55,9 @@ export const currentUser = signal<User | null>(getInitialUser());
 
 export const isAuthenticated = computed(() => !!authToken.value && !!currentUser.value);
 
+export type OnboardingRole = 'customer' | 'worker';
+export const selectedOnboardingRole = signal<OnboardingRole | null>(null);
+
 export const authMode = signal<'login' | 'register'>(getInitialAuthMode());
 export const phoneInput = signal<string>('');
 export const fullNameInput = signal<string>('');
@@ -178,14 +181,27 @@ export async function loginWithPasskey(phoneHint?: string): Promise<boolean> {
  * Initiates WebAuthn registration ceremony via Passkey.
  * Collects 10-digit mobile number, optional full name, and preferred language.
  */
-export async function registerPasskey(customPhone?: string, customName?: string): Promise<boolean> {
+export async function registerPasskey(
+  customPhone?: string,
+  customName?: string,
+  customFlow?: 'customer' | 'worker'
+): Promise<boolean> {
   const phone = (customPhone !== undefined ? customPhone : phoneInput.value).trim();
   const fullName = (customName !== undefined ? customName : fullNameInput.value).trim();
+  const roleFlow = customFlow !== undefined ? customFlow : (selectedOnboardingRole.value || undefined);
 
   if (!/^[6-9]\d{9}$/.test(phone)) {
     authError.value = currentLanguage.value === 'hi'
       ? 'कृपया सही 10 अंकों का मोबाइल नंबर दर्ज करें।'
       : 'Please enter a valid 10-digit mobile number.';
+    return false;
+  }
+
+  // Customer full name is strictly required
+  if (roleFlow === 'customer' && !fullName) {
+    authError.value = currentLanguage.value === 'hi'
+      ? 'कृपया अपना पूरा नाम दर्ज करें।'
+      : 'Please enter your full name.';
     return false;
   }
 
@@ -202,6 +218,7 @@ export async function registerPasskey(customPhone?: string, customName?: string)
         phone,
         fullName: fullName || undefined,
         preferredLanguage: currentLanguage.value || 'hi',
+        flow: roleFlow,
       }),
     });
 
@@ -256,6 +273,7 @@ export async function registerPasskey(customPhone?: string, customName?: string)
         response: regResponse,
         fullName: fullName || undefined,
         preferredLanguage: currentLanguage.value || 'hi',
+        flow: roleFlow,
       }),
     });
 
@@ -336,6 +354,7 @@ export async function logout(): Promise<void> {
   const token = authToken.value;
   authToken.value = null;
   currentUser.value = null;
+  selectedOnboardingRole.value = null;
   authMode.value = 'login';
   phoneInput.value = '';
   fullNameInput.value = '';
@@ -371,6 +390,7 @@ export async function logout(): Promise<void> {
 export function handleSessionExpired(): void {
   authToken.value = null;
   currentUser.value = null;
+  selectedOnboardingRole.value = null;
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);

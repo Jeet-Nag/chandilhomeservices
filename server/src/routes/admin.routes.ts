@@ -85,7 +85,7 @@ export const adminRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     },
     async (request, reply) => {
       try {
-        const query = request.query as { category_id?: string; is_active?: string };
+        const query = request.query as { category_id?: string; is_active?: string; status?: string; verification_status?: string };
         const categoryId = query.category_id ? String(query.category_id).trim() : undefined;
         let isActive: boolean | undefined = undefined;
 
@@ -94,7 +94,10 @@ export const adminRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           else if (query.is_active === 'false') isActive = false;
         }
 
-        const providers = await adminProviderService.listProviders({ categoryId, isActive });
+        const rawStatus = query.status || query.verification_status;
+        const verificationStatus = rawStatus === 'PENDING_VERIFICATION' || rawStatus === 'VERIFIED' ? rawStatus : undefined;
+
+        const providers = await adminProviderService.listProviders({ categoryId, isActive, verificationStatus });
         const response: ApiResponse<{ providers: AdminProviderView[] }> = {
           success: true,
           data: { providers },
@@ -111,6 +114,79 @@ export const adminRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
             },
           };
           return reply.status(err.statusCode).send(response);
+        }
+        throw err;
+      }
+    }
+  );
+
+  /**
+   * POST /api/admin/providers/:id/verify
+   * Explicitly verifies a worker application, promoting role to 'provider' and setting status to 'VERIFIED'.
+   * RBAC: Strictly restricted to 'admin' role.
+   */
+  app.post(
+    '/providers/:id/verify',
+    {
+      preHandler: [authenticate, requireRole(['admin'])],
+    },
+    async (request, reply) => {
+      try {
+        const { id } = request.params as { id: string };
+        const provider = await adminProviderService.verifyWorker(id, request.user.id);
+        const response: ApiResponse<{ provider: AdminProviderView }> = {
+          success: true,
+          data: { provider },
+        };
+        return reply.status(200).send(response);
+      } catch (err: any) {
+        if (err instanceof AdminProviderError || err.name === 'WorkerError') {
+          const response: ApiResponse = {
+            success: false,
+            error: {
+              code: err.code,
+              messageEn: err.messageEn,
+              messageHi: err.messageHi,
+            },
+          };
+          return reply.status(err.statusCode || 400).send(response);
+        }
+        throw err;
+      }
+    }
+  );
+
+  /**
+   * GET /api/admin/providers/:id/documents/:side
+   * Admin-only retrieval of Aadhaar front / back images.
+   * RBAC: Strictly restricted to 'admin' role.
+   */
+  app.get(
+    '/providers/:id/documents/:side',
+    {
+      preHandler: [authenticate, requireRole(['admin'])],
+    },
+    async (request, reply) => {
+      try {
+        const { id, side } = request.params as { id: string; side: string };
+        const docSide = side === 'aadhaar-back' || side === 'back' ? 'back' : 'front';
+        const { buffer, mimeType } = await adminProviderService.getAadhaarDocument(id, docSide);
+        return reply
+          .header('Content-Type', mimeType)
+          .header('X-Content-Type-Options', 'nosniff')
+          .header('Cache-Control', 'private, no-cache')
+          .send(buffer);
+      } catch (err: any) {
+        if (err instanceof AdminProviderError || err.name === 'WorkerError') {
+          const response: ApiResponse = {
+            success: false,
+            error: {
+              code: err.code,
+              messageEn: err.messageEn,
+              messageHi: err.messageHi,
+            },
+          };
+          return reply.status(err.statusCode || 400).send(response);
         }
         throw err;
       }

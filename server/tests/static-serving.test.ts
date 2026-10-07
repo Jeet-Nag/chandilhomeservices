@@ -78,8 +78,8 @@ async function runTests() {
     '2.2 GET /admin returns Content-Type text/html'
   );
   assert(
-    adminRes.payload.includes('<div id="app"></div>') && adminRes.payload.includes('Chandil Home Services'),
-    '2.3 GET /admin returns SPA index.html document'
+    adminRes.payload.includes('<div id="admin-app"></div>') && adminRes.payload.includes('Chandil Home Services'),
+    '2.3 GET /admin returns dedicated admin.html document'
   );
   assert(
     adminRes.headers['cache-control']?.includes('no-cache') === true,
@@ -274,6 +274,22 @@ async function runTests() {
   });
   assert(missingImageRes.statusCode === 404, '11.3 Missing file with extension returns 404');
   assert(!missingImageRes.payload.includes('<!DOCTYPE html>'), '11.4 Missing file does NOT return HTML document');
+
+  // 12. Digital Asset Links (.well-known/assetlinks.json)
+  console.log('\n--- SCENARIO 12: Digital Asset Links (.well-known/assetlinks.json) ---');
+  const assetLinksRes = await app.inject({
+    method: 'GET',
+    url: '/.well-known/assetlinks.json',
+  });
+  assert(assetLinksRes.statusCode === 200, '12.1 GET /.well-known/assetlinks.json returns status 200');
+  assert(
+    assetLinksRes.payload.includes('in.chandilservices.app'),
+    '12.2 assetlinks.json contains package in.chandilservices.app'
+  );
+  assert(
+    assetLinksRes.payload.includes('42:FA:86:31:DF:58:EB:67:ED:F6:AA:74:58:C2:EF:F1:54:5D:0D:66:24:B7:5D:05:75:3D:E0:E1:77:20:91:0F'),
+    '12.3 assetlinks.json contains debug SHA-256 fingerprint'
+  );
 
   console.log('\n============================================================');
   console.log(`TOTAL STATIC SERVING TESTS: ${passedTests} PASS, ${failedTests} FAIL`);

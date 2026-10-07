@@ -24,12 +24,14 @@ import {
 } from './icons';
 import { ServiceCategory } from '@shared';
 import { supportPhone, supportWhatsApp, fetchSupportConfig } from '../state/config';
+import { verifiedWorkers, verifiedWorkersLoading, fetchVerifiedWorkers } from '../state/worker';
 
 export function CustomerHome() {
   useEffect(() => {
     fetchCategories();
     fetchSupportConfig();
-  }, []);
+    fetchVerifiedWorkers(selectedCategory.value?.id);
+  }, [selectedCategory.value?.id]);
 
   const lang = currentLanguage.value || 'en';
   const user = currentUser.value;
@@ -280,7 +282,70 @@ export function CustomerHome() {
           </section>
         )}
 
-        {/* 4. Support & Direct Booking Call/WhatsApp Bar */}
+        {/* 4. Verified Workers in Chandil Section */}
+        <section class="bg-surface border border-border rounded-lg p-4 shadow-sm space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold text-text-main flex items-center space-x-1.5">
+              <span>{t('customer.verified_workers_title')}</span>
+            </h3>
+            <span class="text-xs font-semibold text-action flex items-center space-x-1">
+              <CheckIcon size={14} class="text-action" />
+              <span>{t('worker.verified_badge')}</span>
+            </span>
+          </div>
+
+          {verifiedWorkersLoading.value && (
+            <div class="py-4 flex justify-center items-center space-x-2 text-xs text-text-sub">
+              <SpinnerIcon size={16} class="text-brand" />
+              <span>{t('app.loading')}</span>
+            </div>
+          )}
+
+          {!verifiedWorkersLoading.value && verifiedWorkers.value.length === 0 && (
+            <p class="text-xs text-text-sub py-2 text-center">
+              {t('customer.no_verified_workers')}
+            </p>
+          )}
+
+          {!verifiedWorkersLoading.value && verifiedWorkers.value.length > 0 && (
+            <div class="space-y-2.5" id="verified-workers-list">
+              {verifiedWorkers.value.map((worker) => (
+                <div
+                  key={worker.id}
+                  class="flex items-center justify-between p-3 rounded-lg border border-border bg-white"
+                >
+                  <div class="flex items-center space-x-3">
+                    {worker.photoUrl ? (
+                      <img
+                        src={worker.photoUrl}
+                        alt={worker.fullName}
+                        class="w-11 h-11 rounded-full object-cover border border-border"
+                      />
+                    ) : (
+                      <div class="w-11 h-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-text-sub font-bold text-sm">
+                        {worker.fullName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <div class="text-sm font-bold text-text-main leading-tight flex items-center space-x-1">
+                        <span>{worker.fullName}</span>
+                      </div>
+                      <div class="text-xs text-text-sub mt-0.5">
+                        {lang === 'hi' ? worker.categoryTitleHi : worker.categoryTitleEn}
+                      </div>
+                    </div>
+                  </div>
+
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-green-50 text-action-active border border-green-200">
+                    {t('worker.verified_tick')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* 5. Support & Direct Booking Call/WhatsApp Bar */}
         <section class="bg-surface border border-border rounded-lg p-4 shadow-sm space-y-3">
           <h3 class="text-xs font-bold text-text-sub uppercase tracking-wider">
             {t('app.help')}
