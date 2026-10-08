@@ -21,6 +21,23 @@ export const isReviewModalOpen = signal<boolean>(false);
 export const reviewingProvider = signal<AdminProviderView | null>(null);
 export const isVerifyingWorker = signal<boolean>(false);
 export const verifyError = signal<string | null>(null);
+
+// Document Zoom Viewer state
+export interface ActiveDocumentViewer {
+  url: string;
+  blobUrl: string | null;
+  title: string;
+}
+export const viewingDocument = signal<ActiveDocumentViewer | null>(null);
+
+export function openDocumentViewer(title: string, url: string, blobUrl: string | null): void {
+  viewingDocument.value = { title, url, blobUrl };
+}
+
+export function closeDocumentViewer(): void {
+  viewingDocument.value = null;
+}
+
 export const isFormSubmitting = signal<boolean>(false);
 export const formError = signal<string | null>(null);
 export const formSuccessMessage = signal<string | null>(null);
@@ -272,6 +289,7 @@ export function openReviewModal(provider: AdminProviderView): void {
  */
 export function closeReviewModal(): void {
   if (isVerifyingWorker.value) return;
+  viewingDocument.value = null;
   isReviewModalOpen.value = false;
   reviewingProvider.value = null;
   verifyError.value = null;

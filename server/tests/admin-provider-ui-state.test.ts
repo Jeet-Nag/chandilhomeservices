@@ -24,6 +24,9 @@ import {
   reviewingProvider,
   isVerifyingWorker,
   verifyError,
+  viewingDocument,
+  openDocumentViewer,
+  closeDocumentViewer,
   deactivatingProvider,
   openDeactivateModal,
   closeDeactivateModal,
@@ -166,6 +169,12 @@ async function runTests() {
     'admin.doc_loading',
     'admin.doc_load_error',
     'admin.doc_not_available',
+    'admin.view_document',
+    'admin.zoom_in',
+    'admin.zoom_out',
+    'admin.zoom_reset',
+    'admin.close_viewer',
+    'admin.doc_viewer_title',
     'admin.submitted_on',
     'admin.worker_info_section',
     'admin.documents_section',
@@ -373,6 +382,42 @@ async function runTests() {
   assert(isReviewModalOpen.value === false, 'Review modal closes successfully when not in-flight');
   assert(reviewingProvider.value === null, 'reviewingProvider is cleared on modal close');
   assert(verifyError.value === null, 'verifyError remains null on clean close');
+
+  console.log('\n--- 6. Document Zoom Viewer State & Safety Guarantees ---');
+  assert(viewingDocument.value === null, 'viewingDocument is null initially');
+
+  // Open review modal first
+  openReviewModal(pendingWorker);
+  assert(isReviewModalOpen.value === true, 'Review modal opened for document inspection');
+
+  // Open Document Zoom Viewer
+  const testDocTitle = 'Aadhaar Front';
+  const testDocUrl = `/api/admin/providers/${pendingWorker.id}/documents/aadhaar-front`;
+  const testBlobUrl = 'blob:http://localhost:3000/mock-aadhaar-blob-123';
+  openDocumentViewer(testDocTitle, testDocUrl, testBlobUrl);
+
+  assert(viewingDocument.value !== null, 'viewingDocument is active after openDocumentViewer()');
+  assert(viewingDocument.value?.title === testDocTitle, 'Viewer displays correct document title');
+  assert(viewingDocument.value?.url === testDocUrl, 'Viewer holds correct document endpoint URL');
+  assert(viewingDocument.value?.blobUrl === testBlobUrl, 'Viewer reuses preloaded authenticated blobUrl without re-fetching');
+  assert(isVerifyingWorker.value === false, 'Opening zoom viewer does NOT trigger worker verification request');
+  assert(reviewingProvider.value?.id === pendingWorker.id, 'Underlying review worker state is fully preserved');
+  assert(isReviewModalOpen.value === true, 'Underlying review modal remains active while viewer is open');
+
+  // Close Document Zoom Viewer
+  closeDocumentViewer();
+  assert(viewingDocument.value === null, 'viewingDocument is cleared on closeDocumentViewer()');
+  assert(isReviewModalOpen.value === true, 'Review modal remains open after closing document viewer');
+  assert(reviewingProvider.value?.id === pendingWorker.id, 'Reviewing provider remains active after closing document viewer');
+  assert(isVerifyingWorker.value === false, 'Closing zoom viewer does NOT trigger worker verification request');
+
+  // Re-open viewer and verify clean cascade on closeReviewModal()
+  openDocumentViewer(testDocTitle, testDocUrl, testBlobUrl);
+  assert(viewingDocument.value !== null, 'viewingDocument re-opened successfully');
+  closeReviewModal();
+  assert(viewingDocument.value === null, 'viewingDocument is automatically cleared when review modal closes');
+  assert(isReviewModalOpen.value === false, 'Review modal is closed');
+  assert(reviewingProvider.value === null, 'reviewingProvider is cleared');
 
   console.log('\n============================================================');
   console.log(`CLIENT STATE & UI TESTS: ${passCount} PASSED, ${failCount} FAILED.`);

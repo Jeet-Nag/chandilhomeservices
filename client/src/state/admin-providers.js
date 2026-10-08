@@ -17,6 +17,13 @@ export const isReviewModalOpen = signal(false);
 export const reviewingProvider = signal(null);
 export const isVerifyingWorker = signal(false);
 export const verifyError = signal(null);
+export const viewingDocument = signal(null);
+export function openDocumentViewer(title, url, blobUrl) {
+    viewingDocument.value = { title, url, blobUrl };
+}
+export function closeDocumentViewer() {
+    viewingDocument.value = null;
+}
 export const isFormSubmitting = signal(false);
 export const formError = signal(null);
 export const formSuccessMessage = signal(null);
@@ -253,6 +260,7 @@ export function openReviewModal(provider) {
 export function closeReviewModal() {
     if (isVerifyingWorker.value)
         return;
+    viewingDocument.value = null;
     isReviewModalOpen.value = false;
     reviewingProvider.value = null;
     verifyError.value = null;

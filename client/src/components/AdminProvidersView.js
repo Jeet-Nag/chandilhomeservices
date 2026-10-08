@@ -3,8 +3,8 @@ import { useEffect, useState, useRef } from 'preact/hooks';
 import { currentLanguage, t } from '../state/language';
 import { categories, fetchCategories } from '../state/categories';
 import { authToken, handleSessionExpired } from '../state/auth';
-import { providersList, isProvidersLoading, providersError, providerSearchQuery, providerStatusFilter, providerCategoryFilter, filteredProviders, isAddModalOpen, isEditModalOpen, editingProvider, isReviewModalOpen, reviewingProvider, isVerifyingWorker, verifyError, isFormSubmitting, formError, formSuccessMessage, deactivatingProvider, isDeactivating, deactivationError, statusTogglingId, addFullName, addPhone, addCategoryId, addPreferredLanguage, addServiceArea, editFullName, editCategoryId, editPreferredLanguage, editServiceArea, fetchAdminProviders, openAddModal, closeAddModal, submitAddProvider, openEditModal, closeEditModal, submitEditProvider, openReviewModal, closeReviewModal, verifyWorkerProvider, openDeactivateModal, closeDeactivateModal, confirmDeactivation, activateProvider, clearSuccessMessage, } from '../state/admin-providers';
-import { ToolIcon, SearchIcon, PlusIcon, EditIcon, SpinnerIcon, AlertCircleIcon, CheckIcon, RefreshIcon, XIcon, FileTextIcon, ImageIcon, } from './icons';
+import { providersList, isProvidersLoading, providersError, providerSearchQuery, providerStatusFilter, providerCategoryFilter, filteredProviders, isAddModalOpen, isEditModalOpen, editingProvider, isReviewModalOpen, reviewingProvider, isVerifyingWorker, verifyError, isFormSubmitting, formError, formSuccessMessage, deactivatingProvider, isDeactivating, deactivationError, statusTogglingId, addFullName, addPhone, addCategoryId, addPreferredLanguage, addServiceArea, editFullName, editCategoryId, editPreferredLanguage, editServiceArea, fetchAdminProviders, openAddModal, closeAddModal, submitAddProvider, openEditModal, closeEditModal, submitEditProvider, openReviewModal, closeReviewModal, verifyWorkerProvider, viewingDocument, openDocumentViewer, closeDocumentViewer, openDeactivateModal, closeDeactivateModal, confirmDeactivation, activateProvider, clearSuccessMessage, } from '../state/admin-providers';
+import { ToolIcon, SearchIcon, PlusIcon, EditIcon, SpinnerIcon, AlertCircleIcon, CheckIcon, RefreshIcon, XIcon, FileTextIcon, ImageIcon, ZoomInIcon, ZoomOutIcon, MaximizeIcon, RotateCcwIcon, } from './icons';
 function AuthenticatedDocumentPreview({ url, title, hasDocument, lang, }) {
     const [blobUrl, setBlobUrl] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -73,7 +73,183 @@ function AuthenticatedDocumentPreview({ url, title, hasDocument, lang, }) {
             }
         };
     }, [url, hasDocument]);
-    return (_jsxs("div", { class: "border border-border rounded-lg bg-surface overflow-hidden flex flex-col shadow-2xs", children: [_jsxs("div", { class: "px-3 py-2 bg-slate-100 border-b border-border flex items-center justify-between", children: [_jsx("span", { class: "text-xs font-bold text-text-main truncate", children: title }), hasDocument ? (_jsx("span", { class: "text-[10px] font-semibold px-1.5 py-0.5 rounded bg-green-100 text-action", children: lang === 'hi' ? 'अपलोड किया गया' : 'Uploaded' })) : (_jsx("span", { class: "text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-text-sub", children: t('admin.doc_not_available') }))] }), _jsxs("div", { class: "p-3 flex-1 flex flex-col items-center justify-center min-h-[170px] bg-slate-50/50", children: [!hasDocument && (_jsxs("div", { class: "text-center p-4 text-text-sub", children: [_jsx(ImageIcon, { size: 32, class: "mx-auto mb-1.5 text-slate-400" }), _jsx("span", { class: "text-xs font-medium", children: t('admin.doc_not_available') })] })), hasDocument && loading && (_jsxs("div", { class: "text-center p-4", children: [_jsx(SpinnerIcon, { size: 24, class: "animate-spin text-brand mx-auto mb-2" }), _jsx("span", { class: "text-xs text-text-sub font-medium", children: t('admin.doc_loading') })] })), hasDocument && !loading && error && (_jsxs("div", { class: "text-center p-3", children: [_jsx(AlertCircleIcon, { size: 24, class: "text-danger mx-auto mb-1.5" }), _jsx("span", { class: "text-xs text-danger block mb-2 font-medium", children: t('admin.doc_load_error') }), _jsxs("button", { type: "button", onClick: fetchDocument, class: "px-2.5 py-1 text-xs font-semibold bg-white border border-border rounded hover:bg-slate-50 text-text-main inline-flex items-center gap-1 shadow-2xs", children: [_jsx(RefreshIcon, { size: 12 }), _jsx("span", { children: t('admin.retry') })] })] })), hasDocument && !loading && !error && blobUrl && (_jsx("div", { class: "w-full flex flex-col items-center", children: _jsx("img", { src: blobUrl, alt: title, class: "max-h-52 w-full object-contain rounded border border-border/60 bg-white" }) }))] })] }));
+    return (_jsxs("div", { class: "border border-border rounded-lg bg-surface overflow-hidden flex flex-col shadow-2xs", children: [_jsxs("div", { class: "px-3 py-2 bg-slate-100 border-b border-border flex items-center justify-between", children: [_jsx("span", { class: "text-xs font-bold text-text-main truncate", children: title }), hasDocument ? (_jsx("span", { class: "text-[10px] font-semibold px-1.5 py-0.5 rounded bg-green-100 text-action", children: lang === 'hi' ? 'अपलोड किया गया' : 'Uploaded' })) : (_jsx("span", { class: "text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-text-sub", children: t('admin.doc_not_available') }))] }), _jsxs("div", { class: "p-3 flex-1 flex flex-col items-center justify-center min-h-[170px] bg-slate-50/50", children: [!hasDocument && (_jsxs("div", { class: "text-center p-4 text-text-sub", children: [_jsx(ImageIcon, { size: 32, class: "mx-auto mb-1.5 text-slate-400" }), _jsx("span", { class: "text-xs font-medium", children: t('admin.doc_not_available') })] })), hasDocument && loading && (_jsxs("div", { class: "text-center p-4", children: [_jsx(SpinnerIcon, { size: 24, class: "animate-spin text-brand mx-auto mb-2" }), _jsx("span", { class: "text-xs text-text-sub font-medium", children: t('admin.doc_loading') })] })), hasDocument && !loading && error && (_jsxs("div", { class: "text-center p-3", children: [_jsx(AlertCircleIcon, { size: 24, class: "text-danger mx-auto mb-1.5" }), _jsx("span", { class: "text-xs text-danger block mb-2 font-medium", children: t('admin.doc_load_error') }), _jsxs("button", { type: "button", onClick: fetchDocument, class: "px-2.5 py-1 text-xs font-semibold bg-white border border-border rounded hover:bg-slate-50 text-text-main inline-flex items-center gap-1 shadow-2xs", children: [_jsx(RefreshIcon, { size: 12 }), _jsx("span", { children: t('admin.retry') })] })] })), hasDocument && !loading && !error && blobUrl && (_jsxs("div", { class: "w-full flex flex-col items-center", children: [_jsxs("button", { type: "button", onClick: () => openDocumentViewer(title, url, blobUrl), class: "group relative w-full overflow-hidden rounded border border-border/60 bg-white focus:outline-none focus:ring-2 focus:ring-brand cursor-pointer", "aria-label": `${t('admin.view_document')}: ${title}`, children: [_jsx("img", { src: blobUrl, alt: title, class: "max-h-48 w-full object-contain transition-transform duration-200 group-hover:scale-102" }), _jsx("div", { class: "absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors flex items-center justify-center", children: _jsxs("span", { class: "opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/85 text-white text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-md", children: [_jsx(MaximizeIcon, { size: 14 }), _jsx("span", { children: t('admin.view_document') })] }) })] }), _jsxs("button", { type: "button", onClick: () => openDocumentViewer(title, url, blobUrl), class: "mt-2.5 w-full min-h-[38px] py-1.5 px-3 bg-white hover:bg-slate-50 active:bg-slate-100 border border-border text-text-main text-xs font-semibold rounded-md flex items-center justify-center gap-1.5 shadow-2xs transition-colors", children: [_jsx(MaximizeIcon, { size: 14 }), _jsx("span", { children: t('admin.view_document') })] })] }))] })] }));
+}
+function DocumentZoomViewer({ title, url, initialBlobUrl, lang }) {
+    const [scale, setScale] = useState(1);
+    const [pos, setPos] = useState({ x: 0, y: 0 });
+    const [isDragging, setIsDragging] = useState(false);
+    const [resolvedBlobUrl, setResolvedBlobUrl] = useState(initialBlobUrl);
+    const [loading, setLoading] = useState(!initialBlobUrl);
+    const [loadError, setLoadError] = useState(false);
+    const dragStart = useRef({ x: 0, y: 0 });
+    const lastTouchDist = useRef(null);
+    const touchStartPos = useRef(null);
+    const localBlobRef = useRef(null);
+    // Fallback fetch if initialBlobUrl was not provided
+    useEffect(() => {
+        if (initialBlobUrl) {
+            setResolvedBlobUrl(initialBlobUrl);
+            setLoading(false);
+            return;
+        }
+        const token = authToken.value;
+        if (!token)
+            return;
+        let active = true;
+        setLoading(true);
+        setLoadError(false);
+        fetch(url, {
+            headers: { Authorization: `Bearer ${token}` },
+        })
+            .then((res) => {
+            if (!res.ok)
+                throw new Error('FAILED');
+            return res.blob();
+        })
+            .then((blob) => {
+            if (!active)
+                return;
+            const bUrl = URL.createObjectURL(blob);
+            localBlobRef.current = bUrl;
+            setResolvedBlobUrl(bUrl);
+            setLoading(false);
+        })
+            .catch(() => {
+            if (!active)
+                return;
+            setLoadError(true);
+            setLoading(false);
+        });
+        return () => {
+            active = false;
+            if (localBlobRef.current) {
+                URL.revokeObjectURL(localBlobRef.current);
+                localBlobRef.current = null;
+            }
+        };
+    }, [url, initialBlobUrl]);
+    // Lock body scroll while viewer is open
+    useEffect(() => {
+        const originalOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = originalOverflow;
+        };
+    }, []);
+    const zoomIn = () => {
+        setScale((prev) => Math.min(Number((prev + 0.5).toFixed(2)), 4));
+    };
+    const zoomOut = () => {
+        setScale((prev) => {
+            const next = Math.max(Number((prev - 0.5).toFixed(2)), 0.5);
+            if (next <= 1)
+                setPos({ x: 0, y: 0 });
+            return next;
+        });
+    };
+    const resetZoom = () => {
+        setScale(1);
+        setPos({ x: 0, y: 0 });
+    };
+    // Keyboard navigation (Esc, +, -, 0)
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeDocumentViewer();
+            }
+            else if (e.key === '+' || e.key === '=') {
+                e.preventDefault();
+                zoomIn();
+            }
+            else if (e.key === '-') {
+                e.preventDefault();
+                zoomOut();
+            }
+            else if (e.key === '0') {
+                e.preventDefault();
+                resetZoom();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+    // Mouse pan handlers
+    const handleMouseDown = (e) => {
+        if (e.button !== 0)
+            return;
+        dragStart.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+        setIsDragging(true);
+    };
+    const handleMouseMove = (e) => {
+        if (!isDragging)
+            return;
+        setPos({
+            x: e.clientX - dragStart.current.x,
+            y: e.clientY - dragStart.current.y,
+        });
+    };
+    const handleMouseUp = () => setIsDragging(false);
+    // Wheel zoom
+    const handleWheel = (e) => {
+        e.preventDefault();
+        if (e.deltaY < 0) {
+            zoomIn();
+        }
+        else {
+            zoomOut();
+        }
+    };
+    // Touch pan & Pinch zoom
+    const handleTouchStart = (e) => {
+        if (e.touches.length === 2) {
+            const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            lastTouchDist.current = dist;
+        }
+        else if (e.touches.length === 1) {
+            touchStartPos.current = {
+                x: e.touches[0].clientX - pos.x,
+                y: e.touches[0].clientY - pos.y,
+            };
+            setIsDragging(true);
+        }
+    };
+    const handleTouchMove = (e) => {
+        if (e.touches.length === 2 && lastTouchDist.current !== null) {
+            const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            const factor = dist / lastTouchDist.current;
+            lastTouchDist.current = dist;
+            setScale((prev) => Math.min(Math.max(Number((prev * factor).toFixed(2)), 0.5), 4));
+        }
+        else if (e.touches.length === 1 && touchStartPos.current && isDragging) {
+            setPos({
+                x: e.touches[0].clientX - touchStartPos.current.x,
+                y: e.touches[0].clientY - touchStartPos.current.y,
+            });
+        }
+    };
+    const handleTouchEnd = () => {
+        lastTouchDist.current = null;
+        touchStartPos.current = null;
+        setIsDragging(false);
+    };
+    return (_jsxs("div", { class: "fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-md flex flex-col justify-between overflow-hidden select-none", role: "dialog", "aria-modal": "true", "aria-label": title, onClick: (e) => {
+            if (e.target === e.currentTarget)
+                closeDocumentViewer();
+        }, children: [_jsxs("div", { class: "px-4 py-3 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between shrink-0 z-10 text-white", children: [_jsxs("div", { class: "flex items-center gap-3", children: [_jsx("span", { class: "font-bold text-sm sm:text-base tracking-tight truncate max-w-[200px] sm:max-w-md", children: title }), _jsx("span", { class: "hidden sm:inline-flex px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700", children: t('admin.doc_viewer_title') })] }), _jsxs("button", { type: "button", onClick: closeDocumentViewer, class: "min-h-[44px] min-w-[44px] px-3 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-white rounded-lg flex items-center gap-1.5 transition-colors text-xs font-semibold cursor-pointer", "aria-label": t('admin.close_viewer'), children: [_jsx(XIcon, { size: 18 }), _jsx("span", { class: "hidden sm:inline", children: t('admin.close_viewer') })] })] }), _jsxs("div", { class: "flex-1 relative overflow-hidden flex items-center justify-center p-2 sm:p-4 touch-none cursor-grab active:cursor-grabbing", onMouseDown: handleMouseDown, onMouseMove: handleMouseMove, onMouseUp: handleMouseUp, onMouseLeave: handleMouseUp, onWheel: handleWheel, onTouchStart: handleTouchStart, onTouchMove: handleTouchMove, onTouchEnd: handleTouchEnd, onDblClick: () => {
+                    if (scale > 1)
+                        resetZoom();
+                    else
+                        zoomIn();
+                }, children: [loading && (_jsxs("div", { class: "text-center p-6 text-white", children: [_jsx(SpinnerIcon, { size: 32, class: "animate-spin text-brand-light mx-auto mb-2" }), _jsx("span", { class: "text-xs font-medium text-slate-300", children: t('admin.doc_loading') })] })), loadError && (_jsxs("div", { class: "text-center p-6 text-white bg-slate-900 border border-red-500/30 rounded-xl max-w-sm", children: [_jsx(AlertCircleIcon, { size: 32, class: "text-red-400 mx-auto mb-2" }), _jsx("span", { class: "text-xs text-red-300 block mb-3 font-medium", children: t('admin.doc_load_error') }), _jsx("button", { type: "button", onClick: closeDocumentViewer, class: "px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold cursor-pointer", children: t('admin.close_viewer') })] })), !loading && !loadError && resolvedBlobUrl && (_jsx("img", { src: resolvedBlobUrl, alt: title, draggable: false, class: "pointer-events-auto select-none rounded shadow-2xl transition-transform", style: {
+                            transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
+                            transformOrigin: 'center center',
+                            transition: isDragging ? 'none' : 'transform 0.12s ease-out',
+                            maxWidth: '92vw',
+                            maxHeight: '76vh',
+                            objectFit: 'contain',
+                        } }))] }), _jsx("div", { class: "p-4 flex items-center justify-center shrink-0 z-10 pointer-events-none", children: _jsxs("div", { class: "pointer-events-auto bg-slate-900/90 backdrop-blur-md text-white border border-slate-700/80 rounded-xl px-3 py-2 flex items-center gap-2 sm:gap-3 shadow-xl", children: [_jsxs("button", { type: "button", onClick: zoomOut, disabled: scale <= 0.5, class: "min-h-[44px] min-w-[44px] p-2 hover:bg-slate-800 active:bg-slate-700 rounded-lg flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:hover:bg-transparent transition-colors text-xs font-semibold cursor-pointer", "aria-label": t('admin.zoom_out'), children: [_jsx(ZoomOutIcon, { size: 18 }), _jsx("span", { class: "hidden md:inline", children: t('admin.zoom_out') })] }), _jsxs("span", { class: "px-2.5 py-1 font-mono text-xs font-bold text-amber-400 bg-slate-950 rounded-md border border-slate-800 min-w-[54px] text-center", children: [Math.round(scale * 100), "%"] }), _jsxs("button", { type: "button", onClick: zoomIn, disabled: scale >= 4, class: "min-h-[44px] min-w-[44px] p-2 hover:bg-slate-800 active:bg-slate-700 rounded-lg flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:hover:bg-transparent transition-colors text-xs font-semibold cursor-pointer", "aria-label": t('admin.zoom_in'), children: [_jsx(ZoomInIcon, { size: 18 }), _jsx("span", { class: "hidden md:inline", children: t('admin.zoom_in') })] }), _jsx("div", { class: "h-5 w-px bg-slate-700 mx-0.5 sm:mx-1" }), _jsxs("button", { type: "button", onClick: resetZoom, class: "min-h-[44px] min-w-[44px] px-2.5 py-2 hover:bg-slate-800 active:bg-slate-700 rounded-lg flex items-center justify-center gap-1.5 transition-colors text-xs font-semibold text-slate-200 hover:text-white cursor-pointer", "aria-label": t('admin.zoom_reset'), children: [_jsx(RotateCcwIcon, { size: 16 }), _jsx("span", { children: t('admin.zoom_reset') })] }), _jsx("div", { class: "h-5 w-px bg-slate-700 mx-0.5 sm:mx-1" }), _jsxs("button", { type: "button", onClick: closeDocumentViewer, class: "min-h-[44px] min-w-[44px] px-2.5 py-2 hover:bg-slate-800 active:bg-slate-700 rounded-lg flex items-center justify-center gap-1.5 transition-colors text-xs font-semibold text-slate-200 hover:text-white cursor-pointer", "aria-label": t('admin.close_viewer'), children: [_jsx(XIcon, { size: 16 }), _jsx("span", { children: t('admin.close_viewer') })] })] }) })] }));
 }
 export function AdminProvidersView() {
     const lang = currentLanguage.value || 'en';
@@ -155,5 +331,5 @@ export function AdminProvidersView() {
                                             }) })] })] }), _jsxs("div", { class: "px-6 py-4 border-t border-border flex items-center justify-end gap-3 shrink-0 bg-slate-50", children: [_jsx("button", { type: "button", onClick: closeReviewModal, disabled: isVerifyingWorker.value, class: "min-h-[48px] px-4 py-2.5 bg-white border border-border rounded-lg text-sm font-semibold text-text-main hover:bg-background transition-colors disabled:opacity-50", children: t('admin.cancel') }), _jsx("button", { type: "button", onClick: () => verifyWorkerProvider(reviewingProvider.value.id), disabled: isVerifyingWorker.value, class: "min-h-[48px] px-5 py-2.5 bg-action hover:bg-action-active text-white font-bold rounded-lg shadow-xs flex items-center gap-2 transition-colors disabled:opacity-50", children: isVerifyingWorker.value ? (_jsxs(_Fragment, { children: [_jsx(SpinnerIcon, { size: 18, class: "animate-spin text-white" }), _jsx("span", { children: t('admin.verifying') })] })) : (_jsxs(_Fragment, { children: [_jsx(CheckIcon, { size: 18 }), _jsx("span", { children: t('admin.verify_worker_btn') })] })) })] })] }) })), deactivatingProvider.value && (_jsx("div", { class: "fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-y-auto", children: _jsx("div", { class: "bg-surface border border-border rounded-xl w-full max-w-md shadow-lg overflow-hidden my-8", children: _jsxs("div", { class: "p-6", children: [_jsx("div", { class: "w-12 h-12 rounded-full bg-red-100 text-danger flex items-center justify-center mb-4", children: _jsx(AlertCircleIcon, { size: 24 }) }), _jsx("h3", { class: "text-base font-bold text-text-main mb-2", children: t('admin.deactivate_modal_title') }), _jsx("p", { class: "text-sm text-text-sub leading-relaxed mb-4", children: t('admin.deactivate_confirm_desc', {
                                     name: deactivatingProvider.value.fullName ||
                                         deactivatingProvider.value.phone,
-                                }) }), deactivationError.value && (_jsxs("div", { class: "p-3 mb-4 rounded-lg bg-red-50 border border-red-200 flex items-start gap-2.5 text-danger text-xs font-medium", children: [_jsx(AlertCircleIcon, { size: 18, class: "shrink-0 mt-0.5" }), _jsx("span", { children: deactivationError.value })] })), _jsxs("div", { class: "flex items-center justify-end gap-3 pt-2", children: [_jsx("button", { type: "button", onClick: closeDeactivateModal, disabled: isDeactivating.value, class: "min-h-[48px] px-4 py-2.5 bg-white border border-border rounded-lg text-sm font-semibold text-text-main hover:bg-background transition-colors disabled:opacity-50", children: t('admin.cancel') }), _jsx("button", { type: "button", onClick: confirmDeactivation, disabled: isDeactivating.value, class: "min-h-[48px] px-5 py-2.5 bg-danger hover:bg-red-800 text-white font-semibold rounded-lg shadow-xs flex items-center gap-2 transition-colors disabled:opacity-50", children: isDeactivating.value ? (_jsxs(_Fragment, { children: [_jsx(SpinnerIcon, { size: 18, class: "animate-spin" }), _jsxs("span", { children: [t('admin.deactivate'), "..."] })] })) : (_jsx("span", { children: t('admin.confirm_deactivate_btn') })) })] })] }) }) }))] }));
+                                }) }), deactivationError.value && (_jsxs("div", { class: "p-3 mb-4 rounded-lg bg-red-50 border border-red-200 flex items-start gap-2.5 text-danger text-xs font-medium", children: [_jsx(AlertCircleIcon, { size: 18, class: "shrink-0 mt-0.5" }), _jsx("span", { children: deactivationError.value })] })), _jsxs("div", { class: "flex items-center justify-end gap-3 pt-2", children: [_jsx("button", { type: "button", onClick: closeDeactivateModal, disabled: isDeactivating.value, class: "min-h-[48px] px-4 py-2.5 bg-white border border-border rounded-lg text-sm font-semibold text-text-main hover:bg-background transition-colors disabled:opacity-50", children: t('admin.cancel') }), _jsx("button", { type: "button", onClick: confirmDeactivation, disabled: isDeactivating.value, class: "min-h-[48px] px-5 py-2.5 bg-danger hover:bg-red-800 text-white font-semibold rounded-lg shadow-xs flex items-center gap-2 transition-colors disabled:opacity-50", children: isDeactivating.value ? (_jsxs(_Fragment, { children: [_jsx(SpinnerIcon, { size: 18, class: "animate-spin" }), _jsxs("span", { children: [t('admin.deactivate'), "..."] })] })) : (_jsx("span", { children: t('admin.confirm_deactivate_btn') })) })] })] }) }) })), viewingDocument.value && (_jsx(DocumentZoomViewer, { title: viewingDocument.value.title, url: viewingDocument.value.url, initialBlobUrl: viewingDocument.value.blobUrl, lang: lang }))] }));
 }

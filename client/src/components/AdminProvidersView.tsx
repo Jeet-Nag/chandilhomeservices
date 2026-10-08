@@ -43,6 +43,9 @@ import {
   openReviewModal,
   closeReviewModal,
   verifyWorkerProvider,
+  viewingDocument,
+  openDocumentViewer,
+  closeDocumentViewer,
   openDeactivateModal,
   closeDeactivateModal,
   confirmDeactivation,
@@ -62,6 +65,10 @@ import {
   PhoneIcon,
   FileTextIcon,
   ImageIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+  MaximizeIcon,
+  RotateCcwIcon,
 } from './icons';
 
 interface AuthenticatedDocumentPreviewProps {
@@ -196,13 +203,361 @@ function AuthenticatedDocumentPreview({
 
         {hasDocument && !loading && !error && blobUrl && (
           <div class="w-full flex flex-col items-center">
-            <img
-              src={blobUrl}
-              alt={title}
-              class="max-h-52 w-full object-contain rounded border border-border/60 bg-white"
-            />
+            <button
+              type="button"
+              onClick={() => openDocumentViewer(title, url, blobUrl)}
+              class="group relative w-full overflow-hidden rounded border border-border/60 bg-white focus:outline-none focus:ring-2 focus:ring-brand cursor-pointer"
+              aria-label={`${t('admin.view_document')}: ${title}`}
+            >
+              <img
+                src={blobUrl}
+                alt={title}
+                class="max-h-48 w-full object-contain transition-transform duration-200 group-hover:scale-102"
+              />
+              <div class="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors flex items-center justify-center">
+                <span class="opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/85 text-white text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-md">
+                  <MaximizeIcon size={14} />
+                  <span>{t('admin.view_document')}</span>
+                </span>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => openDocumentViewer(title, url, blobUrl)}
+              class="mt-2.5 w-full min-h-[38px] py-1.5 px-3 bg-white hover:bg-slate-50 active:bg-slate-100 border border-border text-text-main text-xs font-semibold rounded-md flex items-center justify-center gap-1.5 shadow-2xs transition-colors"
+            >
+              <MaximizeIcon size={14} />
+              <span>{t('admin.view_document')}</span>
+            </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+interface DocumentZoomViewerProps {
+  title: string;
+  url: string;
+  initialBlobUrl: string | null;
+  lang: string;
+}
+
+function DocumentZoomViewer({ title, url, initialBlobUrl, lang }: DocumentZoomViewerProps) {
+  const [scale, setScale] = useState<number>(1);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [resolvedBlobUrl, setResolvedBlobUrl] = useState<string | null>(initialBlobUrl);
+  const [loading, setLoading] = useState<boolean>(!initialBlobUrl);
+  const [loadError, setLoadError] = useState<boolean>(false);
+
+  const dragStart = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const lastTouchDist = useRef<number | null>(null);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const localBlobRef = useRef<string | null>(null);
+
+  // Fallback fetch if initialBlobUrl was not provided
+  useEffect(() => {
+    if (initialBlobUrl) {
+      setResolvedBlobUrl(initialBlobUrl);
+      setLoading(false);
+      return;
+    }
+    const token = authToken.value;
+    if (!token) return;
+
+    let active = true;
+    setLoading(true);
+    setLoadError(false);
+
+    fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('FAILED');
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        const bUrl = URL.createObjectURL(blob);
+        localBlobRef.current = bUrl;
+        setResolvedBlobUrl(bUrl);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setLoadError(true);
+        setLoading(false);
+      });
+
+    return () => {
+      active = false;
+      if (localBlobRef.current) {
+        URL.revokeObjectURL(localBlobRef.current);
+        localBlobRef.current = null;
+      }
+    };
+  }, [url, initialBlobUrl]);
+
+  // Lock body scroll while viewer is open
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
+  const zoomIn = () => {
+    setScale((prev) => Math.min(Number((prev + 0.5).toFixed(2)), 4));
+  };
+
+  const zoomOut = () => {
+    setScale((prev) => {
+      const next = Math.max(Number((prev - 0.5).toFixed(2)), 0.5);
+      if (next <= 1) setPos({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  const resetZoom = () => {
+    setScale(1);
+    setPos({ x: 0, y: 0 });
+  };
+
+  // Keyboard navigation (Esc, +, -, 0)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeDocumentViewer();
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        zoomIn();
+      } else if (e.key === '-') {
+        e.preventDefault();
+        zoomOut();
+      } else if (e.key === '0') {
+        e.preventDefault();
+        resetZoom();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Mouse pan handlers
+  const handleMouseDown = (e: MouseEvent) => {
+    if (e.button !== 0) return;
+    dragStart.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+    setIsDragging(true);
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDragging) return;
+    setPos({
+      x: e.clientX - dragStart.current.x,
+      y: e.clientY - dragStart.current.y,
+    });
+  };
+
+  const handleMouseUp = () => setIsDragging(false);
+
+  // Wheel zoom
+  const handleWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      zoomIn();
+    } else {
+      zoomOut();
+    }
+  };
+
+  // Touch pan & Pinch zoom
+  const handleTouchStart = (e: TouchEvent) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      lastTouchDist.current = dist;
+    } else if (e.touches.length === 1) {
+      touchStartPos.current = {
+        x: e.touches[0].clientX - pos.x,
+        y: e.touches[0].clientY - pos.y,
+      };
+      setIsDragging(true);
+    }
+  };
+
+  const handleTouchMove = (e: TouchEvent) => {
+    if (e.touches.length === 2 && lastTouchDist.current !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const factor = dist / lastTouchDist.current;
+      lastTouchDist.current = dist;
+      setScale((prev) => Math.min(Math.max(Number((prev * factor).toFixed(2)), 0.5), 4));
+    } else if (e.touches.length === 1 && touchStartPos.current && isDragging) {
+      setPos({
+        x: e.touches[0].clientX - touchStartPos.current.x,
+        y: e.touches[0].clientY - touchStartPos.current.y,
+      });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    lastTouchDist.current = null;
+    touchStartPos.current = null;
+    setIsDragging(false);
+  };
+
+  return (
+    <div
+      class="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-md flex flex-col justify-between overflow-hidden select-none"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) closeDocumentViewer();
+      }}
+    >
+      {/* Top Header */}
+      <div class="px-4 py-3 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between shrink-0 z-10 text-white">
+        <div class="flex items-center gap-3">
+          <span class="font-bold text-sm sm:text-base tracking-tight truncate max-w-[200px] sm:max-w-md">
+            {title}
+          </span>
+          <span class="hidden sm:inline-flex px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+            {t('admin.doc_viewer_title')}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          onClick={closeDocumentViewer}
+          class="min-h-[44px] min-w-[44px] px-3 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-white rounded-lg flex items-center gap-1.5 transition-colors text-xs font-semibold cursor-pointer"
+          aria-label={t('admin.close_viewer')}
+        >
+          <XIcon size={18} />
+          <span class="hidden sm:inline">{t('admin.close_viewer')}</span>
+        </button>
+      </div>
+
+      {/* Main Image Viewport */}
+      <div
+        class="flex-1 relative overflow-hidden flex items-center justify-center p-2 sm:p-4 touch-none cursor-grab active:cursor-grabbing"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onDblClick={() => {
+          if (scale > 1) resetZoom();
+          else zoomIn();
+        }}
+      >
+        {loading && (
+          <div class="text-center p-6 text-white">
+            <SpinnerIcon size={32} class="animate-spin text-brand-light mx-auto mb-2" />
+            <span class="text-xs font-medium text-slate-300">{t('admin.doc_loading')}</span>
+          </div>
+        )}
+
+        {loadError && (
+          <div class="text-center p-6 text-white bg-slate-900 border border-red-500/30 rounded-xl max-w-sm">
+            <AlertCircleIcon size={32} class="text-red-400 mx-auto mb-2" />
+            <span class="text-xs text-red-300 block mb-3 font-medium">{t('admin.doc_load_error')}</span>
+            <button
+              type="button"
+              onClick={closeDocumentViewer}
+              class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold cursor-pointer"
+            >
+              {t('admin.close_viewer')}
+            </button>
+          </div>
+        )}
+
+        {!loading && !loadError && resolvedBlobUrl && (
+          <img
+            src={resolvedBlobUrl}
+            alt={title}
+            draggable={false}
+            class="pointer-events-auto select-none rounded shadow-2xl transition-transform"
+            style={{
+              transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`,
+              transformOrigin: 'center center',
+              transition: isDragging ? 'none' : 'transform 0.12s ease-out',
+              maxWidth: '92vw',
+              maxHeight: '76vh',
+              objectFit: 'contain',
+            }}
+          />
+        )}
+      </div>
+
+      {/* Bottom Floating Controls Bar */}
+      <div class="p-4 flex items-center justify-center shrink-0 z-10 pointer-events-none">
+        <div class="pointer-events-auto bg-slate-900/90 backdrop-blur-md text-white border border-slate-700/80 rounded-xl px-3 py-2 flex items-center gap-2 sm:gap-3 shadow-xl">
+          {/* Zoom Out */}
+          <button
+            type="button"
+            onClick={zoomOut}
+            disabled={scale <= 0.5}
+            class="min-h-[44px] min-w-[44px] p-2 hover:bg-slate-800 active:bg-slate-700 rounded-lg flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:hover:bg-transparent transition-colors text-xs font-semibold cursor-pointer"
+            aria-label={t('admin.zoom_out')}
+          >
+            <ZoomOutIcon size={18} />
+            <span class="hidden md:inline">{t('admin.zoom_out')}</span>
+          </button>
+
+          {/* Scale Badge */}
+          <span class="px-2.5 py-1 font-mono text-xs font-bold text-amber-400 bg-slate-950 rounded-md border border-slate-800 min-w-[54px] text-center">
+            {Math.round(scale * 100)}%
+          </span>
+
+          {/* Zoom In */}
+          <button
+            type="button"
+            onClick={zoomIn}
+            disabled={scale >= 4}
+            class="min-h-[44px] min-w-[44px] p-2 hover:bg-slate-800 active:bg-slate-700 rounded-lg flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:hover:bg-transparent transition-colors text-xs font-semibold cursor-pointer"
+            aria-label={t('admin.zoom_in')}
+          >
+            <ZoomInIcon size={18} />
+            <span class="hidden md:inline">{t('admin.zoom_in')}</span>
+          </button>
+
+          <div class="h-5 w-px bg-slate-700 mx-0.5 sm:mx-1"></div>
+
+          {/* Reset Zoom */}
+          <button
+            type="button"
+            onClick={resetZoom}
+            class="min-h-[44px] min-w-[44px] px-2.5 py-2 hover:bg-slate-800 active:bg-slate-700 rounded-lg flex items-center justify-center gap-1.5 transition-colors text-xs font-semibold text-slate-200 hover:text-white cursor-pointer"
+            aria-label={t('admin.zoom_reset')}
+          >
+            <RotateCcwIcon size={16} />
+            <span>{t('admin.zoom_reset')}</span>
+          </button>
+
+          <div class="h-5 w-px bg-slate-700 mx-0.5 sm:mx-1"></div>
+
+          {/* Close */}
+          <button
+            type="button"
+            onClick={closeDocumentViewer}
+            class="min-h-[44px] min-w-[44px] px-2.5 py-2 hover:bg-slate-800 active:bg-slate-700 rounded-lg flex items-center justify-center gap-1.5 transition-colors text-xs font-semibold text-slate-200 hover:text-white cursor-pointer"
+            aria-label={t('admin.close_viewer')}
+          >
+            <XIcon size={16} />
+            <span>{t('admin.close_viewer')}</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1265,6 +1620,18 @@ export function AdminProvidersView() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ================================================== */}
+      {/* FULL-SCREEN DOCUMENT ZOOM VIEWER                    */}
+      {/* ================================================== */}
+      {viewingDocument.value && (
+        <DocumentZoomViewer
+          title={viewingDocument.value.title}
+          url={viewingDocument.value.url}
+          initialBlobUrl={viewingDocument.value.blobUrl}
+          lang={lang}
+        />
       )}
     </div>
   );
