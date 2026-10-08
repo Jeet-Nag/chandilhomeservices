@@ -18,6 +18,12 @@ import {
   editServiceArea,
   openEditModal,
   closeEditModal,
+  openReviewModal,
+  closeReviewModal,
+  isReviewModalOpen,
+  reviewingProvider,
+  isVerifyingWorker,
+  verifyError,
   deactivatingProvider,
   openDeactivateModal,
   closeDeactivateModal,
@@ -90,6 +96,26 @@ const mockProviders: AdminProviderView[] = [
     rating: 4.5,
     createdAt: new Date().toISOString(),
   },
+  {
+    id: 'prov-pending',
+    phone: '9876507777',
+    fullName: 'Ramesh Kumar',
+    role: 'customer',
+    preferredLanguage: 'hi',
+    isActive: true,
+    categoryId: 'electrician',
+    categoryTitleEn: 'Electrician',
+    categoryTitleHi: 'बिजली मिस्त्री',
+    serviceArea: 'Chandil',
+    isAvailable: false,
+    rating: 5.0,
+    verificationStatus: 'PENDING_VERIFICATION',
+    submittedAt: '2026-10-08T10:00:00.000Z',
+    hasAadhaarFront: true,
+    hasAadhaarBack: true,
+    hasPhoto: true,
+    createdAt: new Date().toISOString(),
+  },
 ];
 
 async function runTests() {
@@ -112,6 +138,7 @@ async function runTests() {
     'admin.edit_provider',
     'admin.search_placeholder',
     'admin.filter_all',
+    'admin.filter_pending',
     'admin.filter_active',
     'admin.filter_inactive',
     'admin.filter_category_all',
@@ -122,8 +149,26 @@ async function runTests() {
     'admin.col_status',
     'admin.col_availability',
     'admin.col_actions',
+    'admin.status_pending_verification',
+    'admin.status_verified',
     'admin.status_active',
     'admin.status_inactive',
+    'admin.review_application',
+    'admin.review_modal_title',
+    'admin.verify_worker_btn',
+    'admin.verifying',
+    'admin.worker_verified_success',
+    'admin.verify_confirm_title',
+    'admin.verify_confirm_desc',
+    'admin.doc_aadhaar_front',
+    'admin.doc_aadhaar_back',
+    'admin.doc_worker_photo',
+    'admin.doc_loading',
+    'admin.doc_load_error',
+    'admin.doc_not_available',
+    'admin.submitted_on',
+    'admin.worker_info_section',
+    'admin.documents_section',
     'admin.available',
     'admin.unavailable',
     'admin.activate',
@@ -178,11 +223,11 @@ async function runTests() {
   providerCategoryFilter.value = 'all';
 
   // Base list
-  assert(filteredProviders.value.length === 3, 'Default filter returns all 3 providers');
+  assert(filteredProviders.value.length === 4, 'Default filter returns all 4 providers');
 
   // Search by Name (case-insensitive)
-  providerSearchQuery.value = 'ramesh';
-  assert(filteredProviders.value.length === 1 && filteredProviders.value[0].id === 'prov-1', 'Search by name "ramesh" returns Ramesh Sharma');
+  providerSearchQuery.value = 'sharma';
+  assert(filteredProviders.value.length === 1 && filteredProviders.value[0].id === 'prov-1', 'Search by name "sharma" returns Ramesh Sharma');
 
   providerSearchQuery.value = '   SURESH   ';
   assert(filteredProviders.value.length === 1 && filteredProviders.value[0].id === 'prov-2', 'Search with extra whitespace and uppercase returns Suresh Kumar');
@@ -198,15 +243,20 @@ async function runTests() {
   // Reset search
   providerSearchQuery.value = '';
 
-  // Filter by Status: Active
-  providerStatusFilter.value = 'active';
-  assert(filteredProviders.value.length === 2, 'Filter status="active" returns 2 active providers');
-  assert(filteredProviders.value.every((p) => p.isActive), 'All returned providers have isActive === true');
+  // Filter by Status: Pending Verification
+  providerStatusFilter.value = 'pending';
+  assert(filteredProviders.value.length === 1 && filteredProviders.value[0].id === 'prov-pending', 'Filter status="pending" returns 1 pending worker');
+  assert(filteredProviders.value.every((p) => p.verificationStatus === 'PENDING_VERIFICATION'), 'All returned providers have status PENDING_VERIFICATION');
 
-  // Filter by Status: Inactive
+  // Filter by Status: Active (Excludes pending workers)
+  providerStatusFilter.value = 'active';
+  assert(filteredProviders.value.length === 2, 'Filter status="active" returns 2 active providers (excluding pending)');
+  assert(filteredProviders.value.every((p) => p.isActive && p.verificationStatus !== 'PENDING_VERIFICATION'), 'All returned providers have isActive === true and are not pending');
+
+  // Filter by Status: Inactive (Excludes pending workers)
   providerStatusFilter.value = 'inactive';
   assert(filteredProviders.value.length === 1 && filteredProviders.value[0].id === 'prov-2', 'Filter status="inactive" returns 1 inactive provider');
-  assert(filteredProviders.value.every((p) => !p.isActive), 'All returned providers have isActive === false');
+  assert(filteredProviders.value.every((p) => !p.isActive && p.verificationStatus !== 'PENDING_VERIFICATION'), 'All returned providers have isActive === false');
 
   // Filter by Category
   providerStatusFilter.value = 'all';
@@ -214,18 +264,19 @@ async function runTests() {
   assert(filteredProviders.value.length === 1 && filteredProviders.value[0].categoryId === 'plumber', 'Filter category="plumber" returns 1 provider');
 
   providerCategoryFilter.value = 'electrician';
-  assert(filteredProviders.value.length === 1 && filteredProviders.value[0].categoryId === 'electrician', 'Filter category="electrician" returns 1 provider');
+  assert(filteredProviders.value.length === 2, 'Filter category="electrician" returns 2 providers (Ramesh Sharma & Ramesh Kumar)');
 
-  // Combined Filters (Active + Electrician)
-  providerStatusFilter.value = 'active';
+  // Combined Filters (Pending + Electrician)
+  providerStatusFilter.value = 'pending';
   providerCategoryFilter.value = 'electrician';
-  providerSearchQuery.value = 'Ramesh';
-  assert(filteredProviders.value.length === 1, 'Combined filter (active + electrician + Ramesh) returns 1 match');
+  providerSearchQuery.value = 'Kumar';
+  assert(filteredProviders.value.length === 1 && filteredProviders.value[0].id === 'prov-pending', 'Combined filter (pending + electrician + Kumar) returns 1 pending match');
 
-  // Combined Filters with contradiction (Inactive + Electrician -> 0)
-  providerStatusFilter.value = 'inactive';
-  providerCategoryFilter.value = 'electrician';
-  assert(filteredProviders.value.length === 0, 'Contradictory filter (inactive + electrician) returns 0 matches');
+  // Combined Filters with contradiction (Pending + Plumber -> 0)
+  providerStatusFilter.value = 'pending';
+  providerCategoryFilter.value = 'plumber';
+  providerSearchQuery.value = '';
+  assert(filteredProviders.value.length === 0, 'Contradictory filter (pending + plumber) returns 0 matches');
 
   // Reset filters
   providerSearchQuery.value = '';
@@ -299,6 +350,29 @@ async function runTests() {
     hiConflictMsg === 'चल रही बुकिंग के दौरान इस मिस्त्री को निष्क्रिय नहीं किया जा सकता।',
     'Hindi active-booking conflict error is accurate'
   );
+
+  console.log('\n--- 5. Review Modal State & In-Flight Safeguards ---');
+  const pendingWorker = mockProviders.find((p) => p.verificationStatus === 'PENDING_VERIFICATION')!;
+  assert(!!pendingWorker, 'Mock pending worker is present for review test');
+
+  // Open review modal
+  openReviewModal(pendingWorker);
+  assert(isReviewModalOpen.value === true, 'Review modal is open after openReviewModal()');
+  assert(reviewingProvider.value?.id === pendingWorker.id, 'reviewingProvider is correctly set to pending worker');
+  assert(verifyError.value === null, 'verifyError is reset to null when modal opens');
+
+  // Attempt close while verifying in-flight (guard check)
+  isVerifyingWorker.value = true;
+  closeReviewModal();
+  assert(isReviewModalOpen.value === true, 'closeReviewModal() is blocked while isVerifyingWorker is true (in-flight guard)');
+  assert(reviewingProvider.value !== null, 'reviewingProvider is not cleared while verification is in-flight');
+
+  // Close modal when not in-flight
+  isVerifyingWorker.value = false;
+  closeReviewModal();
+  assert(isReviewModalOpen.value === false, 'Review modal closes successfully when not in-flight');
+  assert(reviewingProvider.value === null, 'reviewingProvider is cleared on modal close');
+  assert(verifyError.value === null, 'verifyError remains null on clean close');
 
   console.log('\n============================================================');
   console.log(`CLIENT STATE & UI TESTS: ${passCount} PASSED, ${failCount} FAILED.`);

@@ -1,6 +1,7 @@
-import { useEffect } from 'preact/hooks';
+import { useEffect, useState, useRef } from 'preact/hooks';
 import { currentLanguage, t } from '../state/language';
 import { categories, fetchCategories } from '../state/categories';
+import { authToken, handleSessionExpired } from '../state/auth';
 import {
   providersList,
   isProvidersLoading,
@@ -12,6 +13,10 @@ import {
   isAddModalOpen,
   isEditModalOpen,
   editingProvider,
+  isReviewModalOpen,
+  reviewingProvider,
+  isVerifyingWorker,
+  verifyError,
   isFormSubmitting,
   formError,
   formSuccessMessage,
@@ -35,6 +40,9 @@ import {
   openEditModal,
   closeEditModal,
   submitEditProvider,
+  openReviewModal,
+  closeReviewModal,
+  verifyWorkerProvider,
   openDeactivateModal,
   closeDeactivateModal,
   confirmDeactivation,
@@ -52,7 +60,153 @@ import {
   RefreshIcon,
   XIcon,
   PhoneIcon,
+  FileTextIcon,
+  ImageIcon,
 } from './icons';
+
+interface AuthenticatedDocumentPreviewProps {
+  url: string;
+  title: string;
+  hasDocument: boolean;
+  lang: string;
+}
+
+function AuthenticatedDocumentPreview({
+  url,
+  title,
+  hasDocument,
+  lang,
+}: AuthenticatedDocumentPreviewProps) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<boolean>(false);
+  const blobUrlRef = useRef<string | null>(null);
+
+  const fetchDocument = () => {
+    if (!hasDocument) {
+      setBlobUrl(null);
+      setLoading(false);
+      setError(false);
+      return;
+    }
+
+    const token = authToken.value;
+    if (!token) return;
+
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+
+    setLoading(true);
+    setError(false);
+
+    let active = true;
+
+    fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(async (res) => {
+        if (res.status === 401) {
+          handleSessionExpired();
+          throw new Error('UNAUTHORIZED');
+        }
+        if (!res.ok) {
+          throw new Error('FAILED');
+        }
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        const objectUrl = URL.createObjectURL(blob);
+        blobUrlRef.current = objectUrl;
+        setBlobUrl(objectUrl);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        if (err.message !== 'UNAUTHORIZED') {
+          setError(true);
+        }
+        setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  };
+
+  useEffect(() => {
+    const cancel = fetchDocument();
+    return () => {
+      if (cancel) cancel();
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+    };
+  }, [url, hasDocument]);
+
+  return (
+    <div class="border border-border rounded-lg bg-surface overflow-hidden flex flex-col shadow-2xs">
+      <div class="px-3 py-2 bg-slate-100 border-b border-border flex items-center justify-between">
+        <span class="text-xs font-bold text-text-main truncate">{title}</span>
+        {hasDocument ? (
+          <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-green-100 text-action">
+            {lang === 'hi' ? 'अपलोड किया गया' : 'Uploaded'}
+          </span>
+        ) : (
+          <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-text-sub">
+            {t('admin.doc_not_available')}
+          </span>
+        )}
+      </div>
+
+      <div class="p-3 flex-1 flex flex-col items-center justify-center min-h-[170px] bg-slate-50/50">
+        {!hasDocument && (
+          <div class="text-center p-4 text-text-sub">
+            <ImageIcon size={32} class="mx-auto mb-1.5 text-slate-400" />
+            <span class="text-xs font-medium">{t('admin.doc_not_available')}</span>
+          </div>
+        )}
+
+        {hasDocument && loading && (
+          <div class="text-center p-4">
+            <SpinnerIcon size={24} class="animate-spin text-brand mx-auto mb-2" />
+            <span class="text-xs text-text-sub font-medium">{t('admin.doc_loading')}</span>
+          </div>
+        )}
+
+        {hasDocument && !loading && error && (
+          <div class="text-center p-3">
+            <AlertCircleIcon size={24} class="text-danger mx-auto mb-1.5" />
+            <span class="text-xs text-danger block mb-2 font-medium">{t('admin.doc_load_error')}</span>
+            <button
+              type="button"
+              onClick={fetchDocument}
+              class="px-2.5 py-1 text-xs font-semibold bg-white border border-border rounded hover:bg-slate-50 text-text-main inline-flex items-center gap-1 shadow-2xs"
+            >
+              <RefreshIcon size={12} />
+              <span>{t('admin.retry')}</span>
+            </button>
+          </div>
+        )}
+
+        {hasDocument && !loading && !error && blobUrl && (
+          <div class="w-full flex flex-col items-center">
+            <img
+              src={blobUrl}
+              alt={title}
+              class="max-h-52 w-full object-contain rounded border border-border/60 bg-white"
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function AdminProvidersView() {
   const lang = currentLanguage.value || 'en';
@@ -170,6 +324,7 @@ export function AdminProvidersView() {
               aria-label="Filter by status"
             >
               <option value="all">{t('admin.filter_all')}</option>
+              <option value="pending">{t('admin.filter_pending')}</option>
               <option value="active">{t('admin.filter_active')}</option>
               <option value="inactive">{t('admin.filter_inactive')}</option>
             </select>
@@ -269,9 +424,17 @@ export function AdminProvidersView() {
                 const categoryTitle =
                   lang === 'hi' ? provider.categoryTitleHi : provider.categoryTitleEn;
                 const isToggling = statusTogglingId.value === provider.id;
+                const isPending = provider.verificationStatus === 'PENDING_VERIFICATION';
 
                 return (
-                  <tr key={provider.id} class="hover:bg-slate-50/75 transition-colors">
+                  <tr
+                    key={provider.id}
+                    class={`transition-colors ${
+                      isPending
+                        ? 'bg-amber-50/60 hover:bg-amber-100/60 border-l-4 border-l-amber-500'
+                        : 'hover:bg-slate-50/75'
+                    }`}
+                  >
                     {/* Name */}
                     <td class="py-3.5 px-4 font-semibold text-text-main">
                       {provider.fullName || '—'}
@@ -294,9 +457,14 @@ export function AdminProvidersView() {
                       {provider.serviceArea}
                     </td>
 
-                    {/* Active / Inactive Status */}
+                    {/* Status Column */}
                     <td class="py-3.5 px-4">
-                      {provider.isActive ? (
+                      {isPending ? (
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
+                          <span class="w-1.5 h-1.5 rounded-full bg-amber-600 inline-block animate-pulse"></span>
+                          <span>{t('admin.status_pending_verification')}</span>
+                        </span>
+                      ) : provider.isActive ? (
                         <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-action border border-green-200">
                           <span class="w-1.5 h-1.5 rounded-full bg-action inline-block"></span>
                           <span>{t('admin.status_active')}</span>
@@ -311,7 +479,11 @@ export function AdminProvidersView() {
 
                     {/* Availability */}
                     <td class="py-3.5 px-4">
-                      {provider.isAvailable ? (
+                      {isPending ? (
+                        <span class="text-xs font-medium text-amber-700">
+                          {t('admin.status_pending_verification')}
+                        </span>
+                      ) : provider.isAvailable ? (
                         <span class="text-xs font-medium text-text-main">
                           {t('admin.available')}
                         </span>
@@ -325,41 +497,54 @@ export function AdminProvidersView() {
                     {/* Actions */}
                     <td class="py-3.5 px-4 text-right">
                       <div class="flex items-center justify-end gap-2">
-                        {/* Edit Button */}
-                        <button
-                          onClick={() => openEditModal(provider)}
-                          class="min-h-[48px] px-3 py-2 bg-white border border-border hover:bg-background rounded-lg text-xs font-semibold text-text-main flex items-center gap-1.5 transition-colors"
-                          title={t('admin.edit')}
-                        >
-                          <EditIcon size={14} />
-                          <span>{t('admin.edit')}</span>
-                        </button>
-
-                        {/* Status Toggle Action */}
-                        {provider.isActive ? (
+                        {isPending ? (
                           <button
-                            onClick={() => openDeactivateModal(provider)}
-                            disabled={isToggling}
-                            class="min-h-[48px] px-3 py-2 bg-red-50 hover:bg-red-100 border border-red-200 text-danger rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                            onClick={() => openReviewModal(provider)}
+                            class="min-h-[48px] px-3.5 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-2xs transition-colors"
+                            title={t('admin.review_application')}
                           >
-                            {isToggling ? (
-                              <SpinnerIcon size={14} class="animate-spin inline" />
-                            ) : (
-                              <span>{t('admin.deactivate')}</span>
-                            )}
+                            <FileTextIcon size={14} />
+                            <span>{t('admin.review_application')}</span>
                           </button>
                         ) : (
-                          <button
-                            onClick={() => activateProvider(provider)}
-                            disabled={isToggling}
-                            class="min-h-[48px] px-3 py-2 bg-green-50 hover:bg-green-100 border border-green-200 text-action rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
-                          >
-                            {isToggling ? (
-                              <SpinnerIcon size={14} class="animate-spin inline" />
+                          <>
+                            {/* Edit Button */}
+                            <button
+                              onClick={() => openEditModal(provider)}
+                              class="min-h-[48px] px-3 py-2 bg-white border border-border hover:bg-background rounded-lg text-xs font-semibold text-text-main flex items-center gap-1.5 transition-colors"
+                              title={t('admin.edit')}
+                            >
+                              <EditIcon size={14} />
+                              <span>{t('admin.edit')}</span>
+                            </button>
+
+                            {/* Status Toggle Action */}
+                            {provider.isActive ? (
+                              <button
+                                onClick={() => openDeactivateModal(provider)}
+                                disabled={isToggling}
+                                class="min-h-[48px] px-3 py-2 bg-red-50 hover:bg-red-100 border border-red-200 text-danger rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                              >
+                                {isToggling ? (
+                                  <SpinnerIcon size={14} class="animate-spin inline" />
+                                ) : (
+                                  <span>{t('admin.deactivate')}</span>
+                                )}
+                              </button>
                             ) : (
-                              <span>{t('admin.activate')}</span>
+                              <button
+                                onClick={() => activateProvider(provider)}
+                                disabled={isToggling}
+                                class="min-h-[48px] px-3 py-2 bg-green-50 hover:bg-green-100 border border-green-200 text-action rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                              >
+                                {isToggling ? (
+                                  <SpinnerIcon size={14} class="animate-spin inline" />
+                                ) : (
+                                  <span>{t('admin.activate')}</span>
+                                )}
+                              </button>
                             )}
-                          </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -378,11 +563,14 @@ export function AdminProvidersView() {
             const categoryTitle =
               lang === 'hi' ? provider.categoryTitleHi : provider.categoryTitleEn;
             const isToggling = statusTogglingId.value === provider.id;
+            const isPending = provider.verificationStatus === 'PENDING_VERIFICATION';
 
             return (
               <div
                 key={provider.id}
-                class="bg-surface border border-border rounded-lg p-4 shadow-xs space-y-3"
+                class={`bg-surface border rounded-lg p-4 shadow-xs space-y-3 ${
+                  isPending ? 'border-amber-400 bg-amber-50/25 ring-1 ring-amber-300' : 'border-border'
+                }`}
               >
                 {/* Header: Name and Status */}
                 <div class="flex items-start justify-between gap-2">
@@ -395,7 +583,12 @@ export function AdminProvidersView() {
                     </span>
                   </div>
 
-                  {provider.isActive ? (
+                  {isPending ? (
+                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-600 inline-block animate-pulse"></span>
+                      <span>{t('admin.status_pending_verification')}</span>
+                    </span>
+                  ) : provider.isActive ? (
                     <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-50 text-action border border-green-200">
                       <span class="w-1.5 h-1.5 rounded-full bg-action inline-block"></span>
                       <span>{t('admin.status_active')}</span>
@@ -421,39 +614,51 @@ export function AdminProvidersView() {
                 </div>
 
                 {/* Actions */}
-                <div class="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    onClick={() => openEditModal(provider)}
-                    class="min-h-[48px] px-3 py-2 bg-white border border-border rounded-lg text-xs font-semibold text-text-main hover:bg-background flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <EditIcon size={16} />
-                    <span>{t('admin.edit')}</span>
-                  </button>
-
-                  {provider.isActive ? (
+                <div class="pt-1">
+                  {isPending ? (
                     <button
-                      onClick={() => openDeactivateModal(provider)}
-                      disabled={isToggling}
-                      class="min-h-[48px] px-3 py-2 bg-red-50 hover:bg-red-100 border border-red-200 text-danger rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 flex items-center justify-center"
+                      onClick={() => openReviewModal(provider)}
+                      class="w-full min-h-[48px] px-4 py-2.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-2xs transition-colors"
                     >
-                      {isToggling ? (
-                        <SpinnerIcon size={16} class="animate-spin" />
-                      ) : (
-                        <span>{t('admin.deactivate')}</span>
-                      )}
+                      <FileTextIcon size={16} />
+                      <span>{t('admin.review_application')}</span>
                     </button>
                   ) : (
-                    <button
-                      onClick={() => activateProvider(provider)}
-                      disabled={isToggling}
-                      class="min-h-[48px] px-3 py-2 bg-green-50 hover:bg-green-100 border border-green-200 text-action rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 flex items-center justify-center"
-                    >
-                      {isToggling ? (
-                        <SpinnerIcon size={16} class="animate-spin" />
+                    <div class="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => openEditModal(provider)}
+                        class="min-h-[48px] px-3 py-2 bg-white border border-border rounded-lg text-xs font-semibold text-text-main hover:bg-background flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <EditIcon size={16} />
+                        <span>{t('admin.edit')}</span>
+                      </button>
+
+                      {provider.isActive ? (
+                        <button
+                          onClick={() => openDeactivateModal(provider)}
+                          disabled={isToggling}
+                          class="min-h-[48px] px-3 py-2 bg-red-50 hover:bg-red-100 border border-red-200 text-danger rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 flex items-center justify-center"
+                        >
+                          {isToggling ? (
+                            <SpinnerIcon size={16} class="animate-spin" />
+                          ) : (
+                            <span>{t('admin.deactivate')}</span>
+                          )}
+                        </button>
                       ) : (
-                        <span>{t('admin.activate')}</span>
+                        <button
+                          onClick={() => activateProvider(provider)}
+                          disabled={isToggling}
+                          class="min-h-[48px] px-3 py-2 bg-green-50 hover:bg-green-100 border border-green-200 text-action rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 flex items-center justify-center"
+                        >
+                          {isToggling ? (
+                            <SpinnerIcon size={16} class="animate-spin" />
+                          ) : (
+                            <span>{t('admin.activate')}</span>
+                          )}
+                        </button>
                       )}
-                    </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -819,6 +1024,183 @@ export function AdminProvidersView() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================== */}
+      {/* REVIEW WORKER APPLICATION MODAL                    */}
+      {/* ================================================== */}
+      {isReviewModalOpen.value && reviewingProvider.value && (
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 overflow-y-auto">
+          <div class="bg-surface border border-border rounded-xl w-full max-w-3xl shadow-xl overflow-hidden my-6 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0 bg-slate-50">
+              <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                  <FileTextIcon size={20} />
+                </div>
+                <div>
+                  <h3 class="text-base font-bold text-text-main leading-tight">
+                    {t('admin.review_modal_title')}
+                  </h3>
+                  <span class="inline-flex items-center gap-1 mt-0.5 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-600 inline-block animate-pulse"></span>
+                    <span>{t('admin.status_pending_verification')}</span>
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={closeReviewModal}
+                disabled={isVerifyingWorker.value}
+                class="min-h-[44px] min-w-[44px] p-2 text-text-sub hover:text-text-main rounded-lg flex items-center justify-center disabled:opacity-50 transition-colors"
+                aria-label="Close"
+              >
+                <XIcon size={20} />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Body */}
+            <div class="p-6 space-y-6 overflow-y-auto flex-1">
+              {/* Error Banner */}
+              {verifyError.value && (
+                <div class="p-3.5 rounded-lg bg-red-50 border border-red-200 flex items-start gap-2.5 text-danger text-xs font-medium">
+                  <AlertCircleIcon size={18} class="shrink-0 mt-0.5" />
+                  <span>{verifyError.value}</span>
+                </div>
+              )}
+
+              {/* Section 1: Worker Information */}
+              <div class="space-y-3">
+                <h4 class="text-xs font-bold text-text-sub uppercase tracking-wider flex items-center gap-1.5">
+                  <span>{t('admin.worker_info_section')}</span>
+                </h4>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 bg-slate-50 border border-border/80 rounded-lg p-4 text-xs">
+                  <div>
+                    <span class="text-text-sub block font-medium mb-0.5">{t('admin.field_full_name')}</span>
+                    <span class="text-sm font-bold text-text-main">{reviewingProvider.value.fullName || '—'}</span>
+                  </div>
+
+                  <div>
+                    <span class="text-text-sub block font-medium mb-0.5">{t('admin.field_phone')}</span>
+                    <span class="text-sm font-mono font-bold text-text-main">+91 {reviewingProvider.value.phone}</span>
+                  </div>
+
+                  <div>
+                    <span class="text-text-sub block font-medium mb-0.5">{t('admin.field_category')}</span>
+                    <span class="text-sm font-semibold text-brand">
+                      {lang === 'hi' ? reviewingProvider.value.categoryTitleHi : reviewingProvider.value.categoryTitleEn}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span class="text-text-sub block font-medium mb-0.5">{t('admin.field_service_area')}</span>
+                    <span class="text-sm font-medium text-text-main">{reviewingProvider.value.serviceArea || 'Chandil'}</span>
+                  </div>
+
+                  <div>
+                    <span class="text-text-sub block font-medium mb-0.5">{t('admin.submitted_on')}</span>
+                    <span class="text-xs text-text-main font-mono">
+                      {reviewingProvider.value.submittedAt
+                        ? new Date(reviewingProvider.value.submittedAt).toLocaleString(lang === 'hi' ? 'hi-IN' : 'en-IN', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : '—'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span class="text-text-sub block font-medium mb-0.5">{t('admin.col_status')}</span>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                      {t('admin.status_pending_verification')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Verification Documents */}
+              <div class="space-y-3">
+                <h4 class="text-xs font-bold text-text-sub uppercase tracking-wider">
+                  {t('admin.documents_section')}
+                </h4>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Aadhaar Front */}
+                  <AuthenticatedDocumentPreview
+                    url={`/api/admin/providers/${reviewingProvider.value.id}/documents/aadhaar-front`}
+                    title={t('admin.doc_aadhaar_front')}
+                    hasDocument={!!reviewingProvider.value.hasAadhaarFront}
+                    lang={lang}
+                  />
+
+                  {/* Aadhaar Back */}
+                  <AuthenticatedDocumentPreview
+                    url={`/api/admin/providers/${reviewingProvider.value.id}/documents/aadhaar-back`}
+                    title={t('admin.doc_aadhaar_back')}
+                    hasDocument={!!reviewingProvider.value.hasAadhaarBack}
+                    lang={lang}
+                  />
+
+                  {/* Worker Photo */}
+                  <AuthenticatedDocumentPreview
+                    url={`/api/workers/${reviewingProvider.value.id}/photo`}
+                    title={t('admin.doc_worker_photo')}
+                    hasDocument={!!reviewingProvider.value.hasPhoto}
+                    lang={lang}
+                  />
+                </div>
+              </div>
+
+              {/* Section 3: Verification Confirmation Notice */}
+              <div class="p-4 bg-blue-50/70 border border-blue-200 rounded-lg text-xs text-text-sub space-y-1.5">
+                <div class="font-bold text-brand flex items-center gap-1.5 text-sm">
+                  <CheckIcon size={16} />
+                  <span>{t('admin.verify_confirm_title')}</span>
+                </div>
+                <p class="leading-relaxed">
+                  {t('admin.verify_confirm_desc', {
+                    name: reviewingProvider.value.fullName || reviewingProvider.value.phone,
+                  })}
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div class="px-6 py-4 border-t border-border flex items-center justify-end gap-3 shrink-0 bg-slate-50">
+              <button
+                type="button"
+                onClick={closeReviewModal}
+                disabled={isVerifyingWorker.value}
+                class="min-h-[48px] px-4 py-2.5 bg-white border border-border rounded-lg text-sm font-semibold text-text-main hover:bg-background transition-colors disabled:opacity-50"
+              >
+                {t('admin.cancel')}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => verifyWorkerProvider(reviewingProvider.value!.id)}
+                disabled={isVerifyingWorker.value}
+                class="min-h-[48px] px-5 py-2.5 bg-action hover:bg-action-active text-white font-bold rounded-lg shadow-xs flex items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {isVerifyingWorker.value ? (
+                  <>
+                    <SpinnerIcon size={18} class="animate-spin text-white" />
+                    <span>{t('admin.verifying')}</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckIcon size={18} />
+                    <span>{t('admin.verify_worker_btn')}</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

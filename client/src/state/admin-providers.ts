@@ -10,13 +10,17 @@ export const providersError = signal<string | null>(null);
 
 // Search & Filter state
 export const providerSearchQuery = signal<string>('');
-export const providerStatusFilter = signal<'all' | 'active' | 'inactive'>('all');
+export const providerStatusFilter = signal<'all' | 'pending' | 'active' | 'inactive'>('all');
 export const providerCategoryFilter = signal<string>('all');
 
 // Modals & Mutation state
 export const isAddModalOpen = signal<boolean>(false);
 export const isEditModalOpen = signal<boolean>(false);
 export const editingProvider = signal<AdminProviderView | null>(null);
+export const isReviewModalOpen = signal<boolean>(false);
+export const reviewingProvider = signal<AdminProviderView | null>(null);
+export const isVerifyingWorker = signal<boolean>(false);
+export const verifyError = signal<string | null>(null);
 export const isFormSubmitting = signal<boolean>(false);
 export const formError = signal<string | null>(null);
 export const formSuccessMessage = signal<string | null>(null);
@@ -50,8 +54,13 @@ export const filteredProviders = computed(() => {
 
   return providersList.value.filter((provider) => {
     // 1. Status Filter
-    if (status === 'active' && !provider.isActive) return false;
-    if (status === 'inactive' && provider.isActive) return false;
+    if (status === 'pending') {
+      if (provider.verificationStatus !== 'PENDING_VERIFICATION') return false;
+    } else if (status === 'active') {
+      if (!provider.isActive || provider.verificationStatus === 'PENDING_VERIFICATION') return false;
+    } else if (status === 'inactive') {
+      if (provider.isActive || provider.verificationStatus === 'PENDING_VERIFICATION') return false;
+    }
 
     // 2. Category Filter
     if (category !== 'all' && provider.categoryId !== category) return false;
@@ -247,6 +256,76 @@ export function closeEditModal(): void {
   isEditModalOpen.value = false;
   editingProvider.value = null;
   formError.value = null;
+}
+
+/**
+ * Open Review Worker Application modal.
+ */
+export function openReviewModal(provider: AdminProviderView): void {
+  reviewingProvider.value = provider;
+  verifyError.value = null;
+  isReviewModalOpen.value = true;
+}
+
+/**
+ * Close Review Worker Application modal (guarded against in-flight verification).
+ */
+export function closeReviewModal(): void {
+  if (isVerifyingWorker.value) return;
+  isReviewModalOpen.value = false;
+  reviewingProvider.value = null;
+  verifyError.value = null;
+}
+
+/**
+ * Verify a pending worker application via POST /api/admin/providers/:id/verify.
+ * Atomically promotes worker role to provider and verification_status to VERIFIED.
+ */
+export async function verifyWorkerProvider(providerId: string): Promise<boolean> {
+  const token = authToken.value;
+  if (!token || isVerifyingWorker.value) return false;
+
+  isVerifyingWorker.value = true;
+  verifyError.value = null;
+
+  try {
+    const res = await fetch(`/api/admin/providers/${providerId}/verify`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (res.status === 401) {
+      handleSessionExpired();
+      return false;
+    }
+
+    const body: ApiResponse<{ provider: AdminProviderView }> = await res.json();
+
+    if (!res.ok || !body.success || !body.data) {
+      verifyError.value =
+        currentLanguage.value === 'hi'
+          ? body.error?.messageHi || 'सत्यापन करने में त्रुटि हुई।'
+          : body.error?.messageEn || 'Error verifying worker.';
+      return false;
+    }
+
+    // Success: close review modal, show toast, refresh provider list
+    isReviewModalOpen.value = false;
+    reviewingProvider.value = null;
+    formSuccessMessage.value = t('admin.worker_verified_success');
+    await fetchAdminProviders();
+    return true;
+  } catch {
+    verifyError.value =
+      currentLanguage.value === 'hi'
+        ? 'नेटवर्क त्रुटि। कृपया पुनः प्रयास करें।'
+        : 'Network error. Please try again.';
+    return false;
+  } finally {
+    isVerifyingWorker.value = false;
+  }
 }
 
 /**
